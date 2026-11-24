@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/strcat.h"
@@ -32,6 +33,7 @@
 #include "third_party/blink/public/common/page/page_zoom.h"
 #include "ui/accessibility/ax_mode.h"
 #include "ui/accessibility/ax_tree_update.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace ardia {
 namespace {
@@ -45,6 +47,7 @@ constexpr size_t kTreeMaxNodes = 20000;
 constexpr size_t kMaxOcclusionChecks = 40;
 constexpr int kMaxHitDepth = 4;
 constexpr int kMaxScrollTries = 4;
+constexpr base::TimeDelta kFrameWait = base::Milliseconds(1000);
 
 using Outcome = base::expected<base::DictValue, std::string>;
 
@@ -100,6 +103,10 @@ class TabOp : public content::WebContentsObserver {
           args_.owner,
           base::BindOnce(&TabOp::Fail, weak_factory_.GetWeakPtr(),
                          std::string("cancelled")));
+    }
+    if (args_.kind == Kind::kClick) {
+      drawing_ = contents->IncrementCapturerCount(gfx::Size(), true, false,
+                                                  false);
     }
     deadline_.Start(FROM_HERE, kOpDeadline,
                     base::BindOnce(&TabOp::Fail, base::Unretained(this),
@@ -222,7 +229,7 @@ class TabOp : public content::WebContentsObserver {
     const std::string* token = node ? node->FindString("frameId") : nullptr;
     if (token) {
       frame.token = *token;
-      content::RenderFrameHost* rfh = FrameFor(*token);
+      content::RenderFrameHost* rfh = FrameWithToken(web_contents(), *token);
       while (rfh && rfh->GetParent() && !rfh->IsCrossProcessSubframe()) {
         rfh = rfh->GetParent();
       }
@@ -240,17 +247,6 @@ class TabOp : public content::WebContentsObserver {
     }
     ++frame_cursor_;
     ResolveNextFrame();
-  }
-
-  content::RenderFrameHost* FrameFor(const std::string& token) {
-    content::RenderFrameHost* found = nullptr;
-    web_contents()->GetPrimaryMainFrame()->ForEachRenderFrameHost(
-        [&](content::RenderFrameHost* frame) {
-          if (!found && frame->GetDevToolsFrameToken().ToString() == token) {
-            found = frame;
-          }
-        });
-    return found;
   }
 
   void Proceed() {
@@ -271,19 +267,7 @@ class TabOp : public content::WebContentsObserver {
     if (!args_.occlusion || !probe_) {
       return FinishSnapshot();
     }
-    const int scope = ScopeRoot();
-    for (size_t i = 0; i < model_->items.size(); ++i) {
-      const AxItem& item = model_->items[i];
-      if (!item.interactive || item.hidden ||
-          !model_->InViewport(static_cast<int>(i)) ||
-          !model_->IsAncestor(scope, static_cast<int>(i))) {
-        continue;
-      }
-      checks_.push_back(static_cast<int>(i));
-      if (checks_.size() >= kMaxOcclusionChecks) {
-        break;
-      }
-    }
+    checks_ = OcclusionCandidates(*model_, ScopeRoot(), kMaxOcclusionChecks);
     check_cursor_ = 0;
     NextOcclusion();
   }
@@ -481,8 +465,26 @@ class TabOp : public content::WebContentsObserver {
       return Finish(std::move(out));
     }
     result_ = std::move(out);
+    WaitForFrame();
+  }
+  void WaitForFrame() {
+    waiting_frame_ = true;
+    frame_timer_.Start(FROM_HERE, kFrameWait,
+                       base::BindOnce(&TabOp::FrameReady,
+                                      weak_factory_.GetWeakPtr(), false));
+    web_contents()->GetPrimaryMainFrame()->InsertVisualStateCallback(
+        base::BindOnce(&TabOp::FrameReady, weak_factory_.GetWeakPtr()));
+  }
+
+  void FrameReady(bool committed) {
+    if (!waiting_frame_) {
+      return;
+    }
+    waiting_frame_ = false;
+    frame_timer_.Stop();
     Press("mouseMoved");
   }
+
   void Press(const std::string& type) {
     base::DictValue params;
     params.Set("type", type);
@@ -544,6 +546,8 @@ class TabOp : public content::WebContentsObserver {
     }
     finished_ = true;
     deadline_.Stop();
+    frame_timer_.Stop();
+    drawing_.RunAndReset();
     Observe(nullptr);
     if (outcome.has_value()) {
       out_.Send(std::move(outcome.value()));
@@ -577,6 +581,9 @@ class TabOp : public content::WebContentsObserver {
   gfx::PointF point_;
   base::DictValue result_;
   base::OneShotTimer deadline_;
+  base::OneShotTimer frame_timer_;
+  base::ScopedClosureRunner drawing_;
+  bool waiting_frame_ = false;
   base::WeakPtrFactory<TabOp> weak_factory_{this};
 };
 

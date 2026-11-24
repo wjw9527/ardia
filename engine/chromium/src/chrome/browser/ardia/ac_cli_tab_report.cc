@@ -9,12 +9,41 @@
 #include "chrome/browser/ardia/ac_cli_ops.h"
 #include "chrome/browser/ardia/ac_cli_page_model.h"
 #include "chrome/browser/ardia/ac_cli_tab_ops.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/web_contents.h"
 
 namespace ardia {
 namespace {
 
 constexpr size_t kDismissChoices = 4;
 
+}
+
+std::vector<int> OcclusionCandidates(const PageModel& model,
+                                     int scope,
+                                     size_t limit) {
+  std::vector<int> found;
+  for (size_t i = 0; i < model.items.size() && found.size() < limit; ++i) {
+    const int index = static_cast<int>(i);
+    const AxItem& item = model.items[i];
+    if (item.interactive && !item.hidden && model.InViewport(index) &&
+        model.IsAncestor(scope, index)) {
+      found.push_back(index);
+    }
+  }
+  return found;
+}
+
+content::RenderFrameHost* FrameWithToken(content::WebContents* contents,
+                                         const std::string& token) {
+  content::RenderFrameHost* found = nullptr;
+  contents->GetPrimaryMainFrame()->ForEachRenderFrameHost(
+      [&](content::RenderFrameHost* frame) {
+        if (!found && frame->GetDevToolsFrameToken().ToString() == token) {
+          found = frame;
+        }
+      });
+  return found;
 }
 
 base::DictValue DescribeItem(const PageModel& model, RefStore* refs, int item) {

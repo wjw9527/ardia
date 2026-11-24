@@ -7,6 +7,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "base/values.h"
 #include "chrome/browser/ardia/ac_cli_page_model.h"
@@ -14,6 +15,7 @@
 #include "ui/gfx/geometry/point_f.h"
 
 namespace content {
+class RenderFrameHost;
 class WebContents;
 }
 
@@ -55,6 +57,13 @@ base::DictValue RenderSnapshot(const PageModel& model,
                                const SnapshotRender& render);
 
 base::DictValue DescribeItem(const PageModel& model, RefStore* refs, int item);
+
+std::vector<int> OcclusionCandidates(const PageModel& model,
+                                     int scope,
+                                     size_t limit);
+
+content::RenderFrameHost* FrameWithToken(content::WebContents* contents,
+                                         const std::string& token);
 
 int ReportBlocker(const PageModel& model,
                   RefStore* refs,
