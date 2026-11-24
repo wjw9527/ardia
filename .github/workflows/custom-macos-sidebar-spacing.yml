@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 55cdee2f878d35398656a121e8818671da44610e
+          ref: 95ecbd194163d5a7c2f67c6e13138f3ae3764b94
           persist-credentials: false
       - name: Verify runner
         run: |
@@ -47,7 +47,7 @@ jobs:
         working-directory: apps/browser
         run: |
           pnpm typecheck
-          node --no-warnings --import ./src/test-loader.mjs --test src/lib/windowLayout.test.mjs src/state/settings/settings.test.mjs src/state/browser/windowSettingsWatch.test.mjs src/components/sidebar/rowHover.test.mjs src/components/window/dockMotion.test.mjs src/components/omnibox/barButtonsPress.test.mjs src/state/sync/cycleRepairs.test.mjs src/state/sync/adapters.test.mjs
+          node --no-warnings --import ./src/test-loader.mjs --test src/lib/windowLayout.test.mjs src/state/settings/settings.test.mjs src/state/browser/windowSettingsWatch.test.mjs src/components/sidebar/rowHover.test.mjs src/components/window/dockMotion.test.mjs src/components/omnibox/barButtonsPress.test.mjs src/components/toolbar/fieldButtons.test.mjs src/state/sync/cycleRepairs.test.mjs src/state/sync/adapters.test.mjs
       - name: Install CocoaPods
         working-directory: apps/browser/macos
         run: pod install
