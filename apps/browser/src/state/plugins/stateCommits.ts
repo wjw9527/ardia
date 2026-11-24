@@ -27,14 +27,22 @@ export function takePluginStateCommits(): PageCommit[] {
   return taken;
 }
 
+let reported = false;
+
 export function listenForPluginStateCommits(on: (() => void) | null) {
-  if (!!on === !!listener) {
-    listener = on;
-    return;
-  }
+  const wasOn = !!listener;
   listener = on;
-  latest.clear();
-  collected = new Map();
-  listeningSince = Date.now();
-  void reportPageCommits("pluginState", !!on).catch(() => {});
+  if (!!on !== wasOn) {
+    latest.clear();
+    collected = new Map();
+    listeningSince = Date.now();
+    reported = false;
+  }
+  if (on && !reported) {
+    reported = true;
+    void reportPageCommits("pluginState", true).catch(() => {
+      reported = false;
+    });
+  }
+  if (!on && wasOn) void reportPageCommits("pluginState", false).catch(() => {});
 }

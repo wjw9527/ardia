@@ -239,7 +239,7 @@ export function flushStateEvents() {
     total.navigation += delivered.navigation;
   }
   notePluginTimes("plugin_state_events", total.state, consent);
-  notePluginTimes("plugin_state_events", total.navigation, commits[0]?.consent ?? consent);
+  notePluginTimes("plugin_state_events", total.navigation, commits.length ? commits[0]!.consent : consent);
   if (Date.now() - started > SLOW_FLUSH_MS) notePlugin("plugin_state_flushes_slow", consent);
   syncWatching();
 }

@@ -671,6 +671,37 @@ test("hostile text in an intent never reaches the store as anything but plain te
   assert.equal(S().groups[group].name, "Reading list", "a plain name applies");
 });
 
+test("a refused commit-report registration is tried again on the next delivery", async () => {
+  let w;
+  stub.commitReportFailures.next = 1;
+  const from = stub.commitReports.length;
+  await subscribed(WATCHER, ["navigation"], () => (w = S().createWindow({ url: "https://a.example/" })));
+  await settle();
+  S().newTab(w, { url: "https://b.example/" });
+  flushStateEvents();
+  await settle();
+  const asked = stub.commitReports.slice(from).filter((on) => on === true).length;
+  assert.ok(asked >= 2, `asked ${asked} times`);
+  host.events.length = 0;
+  notePluginStateCommit(activeTabId(S(), w), "https://c.example/", Date.now() + 1000);
+  flushStateEvents();
+  assert.equal(stateEvents("watcher", "navigation").flatMap((e) => e.commits).length, 1);
+});
+
+test("a navigation that happened while sharing was off is never counted in a later sharing period", async () => {
+  let w;
+  await subscribed(WATCHER, ["navigation"], () => (w = S().createWindow({ url: "https://a.example/" })));
+  setConsentPeriod(false, "plugin-state-off");
+  notePluginStateCommit(activeTabId(S(), w), "https://quiet.example/", Date.now() + 1000);
+  setConsentPeriod(true, "plugin-state-back-on");
+  takePluginCounts();
+  host.events.length = 0;
+  flushStateEvents();
+  assert.equal(stateEvents("watcher", "navigation").length, 1, "the event itself still goes out");
+  assert.equal(takePluginCounts().plugin_state_events, 0, "but it isn't counted in the new period");
+  setConsentPeriod(true, "plugin-state-hooks-test");
+});
+
 test("subscriptions end with the run", async () => {
   await subscribed(WATCHER, ["tabs"]);
   assert.equal(stateSubscriberCount(), 1);
