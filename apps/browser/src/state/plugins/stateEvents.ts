@@ -11,25 +11,21 @@ import { warnFor } from "../telemetry/consoleConsent";
 import { acceptsRun } from "./process";
 import { activeManifest, currentPlugins } from "./store";
 import { listenForPluginStateCommits, takePluginStateCommits, type PageCommit } from "./stateCommits";
+import { byteLength, packEvents, STATE_ROUND_BYTES, type Item } from "./stateEventPacking";
 import { cleanStateText, pluginStateUrl, redactedDownloads, redactedGroups, redactedTabs, redactedWindows, redactionFor, type Redaction } from "./pluginEventRedaction";
 
 export const STATE_FLUSH_MS = 100;
-export const STATE_EVENT_BUDGET_BYTES = 256 * 1024;
-export const MAX_STATE_LINE_BYTES = 1_048_576;
 const SLOW_FLUSH_MS = 16;
 
 type Caller = { name: string; run: number };
 type Sent = Map<string, string>;
 type Subscriber = Caller & { topics: Set<StateTopic>; sent: Map<StateTopic, Sent> };
 type Rows = Map<string, unknown>;
-type Event = Record<string, unknown>;
 
 const subscribers = new Map<string, Subscriber>();
 let dirty = new Set<StateTopic>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 let stopWatching: (() => void) | null = null;
-const encoder = new TextEncoder();
-const byteLength = (text: string) => encoder.encode(text).length;
 
 const keyOf = (c: Caller) => `${c.name}#${c.run}`;
 
@@ -54,7 +50,7 @@ const wantsCommits = () => [...subscribers.values()].some((sub) => sub.topics.ha
 function syncWatching() {
   if (subscribers.size) stopWatching ??= useBrowser.subscribeTo(["tabs", "windows", "windowOrder", "groups", "peeks", "ui", "downloads", "profiles"], onCommit);
   if (wantsCommits()) {
-    listenForPluginStateCommits(onPageCommit, () => Object.values(useBrowser.getState().tabs).map((t): [string, string] => [t.id, t.url]));
+    listenForPluginStateCommits(onPageCommit);
   } else listenForPluginStateCommits(null);
   if (subscribers.size) return;
   stopWatching?.();
@@ -125,93 +121,77 @@ function rowsOf(topic: Exclude<StateTopic, "navigation">, s: BrowserState, r: Re
   }
 }
 
-type Diff = { changed: [string, unknown][]; removed: string[]; initial: boolean; after: Sent };
+type Diff = { changed: [string, unknown][]; removed: string[]; before: Sent | undefined; signatures: Sent };
 
 function diffRows(sub: Subscriber, topic: StateTopic, rows: Rows): Diff {
   const before = sub.sent.get(topic);
-  const after: Sent = new Map();
+  const signatures: Sent = new Map();
   const changed: [string, unknown][] = [];
   for (const [id, row] of rows) {
     const sig = JSON.stringify(row);
-    after.set(id, sig);
+    signatures.set(id, sig);
     if (before?.get(id) !== sig) changed.push([id, row]);
   }
-  const removed = before ? [...before.keys()].filter((id) => !after.has(id)) : [];
-  return { changed, removed, initial: !before, after };
+  const removed = before ? [...before.keys()].filter((id) => !signatures.has(id)) : [];
+  return { changed, removed, before, signatures };
 }
 
-export function packedEvents(fields: Record<string, unknown[]>, initial: boolean, budget = STATE_EVENT_BUDGET_BYTES): Event[] {
-  const names = Object.keys(fields);
-  const empty = (): Event => Object.fromEntries(names.map((n) => [n, [] as unknown[]]));
-  const overhead = byteLength(JSON.stringify(empty())) + 32;
-  const events: Event[] = [];
-  let current = empty();
-  let size = overhead;
-  let inCurrent = 0;
-  let total = 0;
-  for (const name of names) {
-    for (const item of fields[name]!) {
-      const bytes = byteLength(JSON.stringify(item)) + 1;
-      if (inCurrent && size + bytes > budget) {
-        events.push(current);
-        current = empty();
-        size = overhead;
-        inCurrent = 0;
-      }
-      (current[name] as unknown[]).push(item);
-      size += bytes;
-      inCurrent++;
-      total++;
-    }
-  }
-  if (!total && !initial) return [];
-  if (inCurrent || !events.length) events.push(current);
-  if (initial) events[0] = { initial: true, ...events[0] };
-  return events;
-}
+const REMOVED = "\u0000removed:";
 
-function eventsFor(diff: Diff, topic: Exclude<StateTopic, "navigation">): Event[] {
-  const { changed, removed, initial } = diff;
-  if (!initial && !changed.length && !removed.length) return [];
+function itemsFor(diff: Diff, topic: Exclude<StateTopic, "navigation">): { fields: string[]; items: Item[] } {
+  const removedItems = (prefix: string, field: string): Item[] => diff.removed.filter((id) => id.startsWith(prefix)).map((id) => ({ key: REMOVED + id, field, value: id.slice(prefix.length) }));
   if (topic === "workspace") {
-    const gone = (prefix: string) => removed.filter((id) => id.startsWith(prefix)).map((id) => id.slice(prefix.length));
-    return packedEvents(
-      {
-        windows: changed.filter(([id]) => id.startsWith("w:")).map(([, row]) => row),
-        groups: changed.filter(([id]) => id.startsWith("g:")).map(([, row]) => row),
-        removedWindows: gone("w:"),
-        removedGroups: gone("g:"),
-      },
-      initial,
-    );
+    return {
+      fields: ["windows", "groups", "removedWindows", "removedGroups"],
+      items: [
+        ...diff.changed.filter(([id]) => id.startsWith("w:")).map(([key, value]) => ({ key, field: "windows", value })),
+        ...diff.changed.filter(([id]) => id.startsWith("g:")).map(([key, value]) => ({ key, field: "groups", value })),
+        ...removedItems("w:", "removedWindows"),
+        ...removedItems("g:", "removedGroups"),
+      ],
+    };
   }
-  return packedEvents({ [topic]: changed.map(([, row]) => row), removed }, initial);
+  return { fields: [topic, "removed"], items: [...diff.changed.map(([key, value]) => ({ key, field: topic, value })), ...removedItems("", "removed")] };
 }
 
-function commitsFor(s: BrowserState, commits: PageCommit[], r: Redaction): Event[] {
-  const shown = commits.flatMap((c) => {
+function nextBaseline(diff: Diff, sentKeys: Set<string>): Sent {
+  const next: Sent = new Map(diff.before ?? []);
+  for (const [id] of diff.changed) if (sentKeys.has(id)) next.set(id, diff.signatures.get(id)!);
+  for (const id of diff.removed) if (sentKeys.has(REMOVED + id)) next.delete(id);
+  return next;
+}
+
+function commitItems(s: BrowserState, commits: PageCommit[], r: Redaction): Item[] {
+  return commits.flatMap((c) => {
     const t = s.tabs[c.tabId];
     if (!t || !isEligibleTab(s, c.tabId)) return [];
     const url = pluginStateUrl(c.url, r);
     if (url === null) return [];
     const title = t.url === c.url ? cleanStateText(t.customTitle || t.title, 500) : null;
-    return [{ tabId: c.tabId, windowId: t.windowId, url, title, sameDocument: c.sameDocument }];
+    return [{ key: null, field: "commits", value: { tabId: c.tabId, windowId: t.windowId, url, title, sameDocument: c.sameDocument } }];
   });
-  return shown.length ? packedEvents({ commits: shown }, false) : [];
 }
 
-function sendAll(sub: Subscriber, topic: StateTopic, events: Event[], time: number): number {
-  const lines = events.map((data) => JSON.stringify({ event: `state.${topic}`, time, data }));
-  if (lines.some((line) => byteLength(line) > MAX_STATE_LINE_BYTES)) throw new Error("A state event is larger than the channel takes.");
+function send(sub: Subscriber, lines: string[]): number {
   for (const line of lines) sendToPlugin(sub.name, sub.run, line);
   return lines.length;
 }
 
-function deliver(sub: Subscriber, topic: StateTopic, s: BrowserState, r: Redaction, cache: Map<string, Rows>, commits: PageCommit[], time: number): number {
-  if (topic === "navigation") return sendAll(sub, topic, commitsFor(s, commits, r), time);
+type Round = { left: number };
+
+function deliver(sub: Subscriber, topic: StateTopic, s: BrowserState, r: Redaction, cache: Map<string, Rows>, commits: PageCommit[], time: number, round: Round): number {
+  if (topic === "navigation") {
+    const items = commitItems(s, commits, r);
+    return items.length ? send(sub, packEvents(topic, ["commits"], items, { initial: false, time }).lines) : 0;
+  }
   const diff = diffRows(sub, topic, rowsOf(topic, s, r, cache));
-  const count = sendAll(sub, topic, eventsFor(diff, topic), time);
-  sub.sent.set(topic, diff.after);
+  if (diff.before && !diff.changed.length && !diff.removed.length) return 0;
+  const { fields, items } = itemsFor(diff, topic);
+  const packed = packEvents(topic, fields, items, { initial: !diff.before, time, roundBytes: Math.max(0, round.left) });
+  round.left -= packed.lines.reduce((n, line) => n + byteLength(line) + 1, 0);
+  const count = send(sub, packed.lines);
+  sub.sent.set(topic, nextBaseline(diff, packed.sentKeys));
+  if (packed.held) markDirty([topic]);
   return count;
 }
 
@@ -225,10 +205,11 @@ function flushFor(sub: Subscriber, topics: Set<StateTopic>, s: BrowserState, cac
     return delivered;
   }
   const r = redactionFor(m.permissions);
+  const round: Round = { left: STATE_ROUND_BYTES };
   for (const topic of sub.topics) {
     if (!topics.has(topic) || !grantsTopic(m.permissions.state, topic)) continue;
     try {
-      delivered[topic === "navigation" ? "navigation" : "state"] += deliver(sub, topic, s, r, cache, commits, time);
+      delivered[topic === "navigation" ? "navigation" : "state"] += deliver(sub, topic, s, r, cache, commits, time, round);
     } catch (error) {
       sub.sent.delete(topic);
       notePlugin("plugin_state_events_dropped", consent);

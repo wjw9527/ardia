@@ -886,6 +886,55 @@ describe("createHostRuntime", () => {
     assert.equal(host.calls("subscribe").length, 1, "an unchanged failed request isn't retried on its own");
   });
 
+  test("drops that keep coming right after each resync back off, then stop with a state_desync error", async () => {
+    let clock = 1_000_000;
+    const host = fakeHost({ hello });
+    const errors = [];
+    const runtime = createHostRuntime(host.transport, { onError: (e) => errors.push(e), resyncBackoffMs: 1, now: () => clock });
+    await runtime.definePlugin({});
+    runtime.ardia.tabs.onChange(() => {});
+    await settle();
+    const resyncs = () => host.calls("state.subscribe").filter((m) => m.params.resync === true).length;
+    const drop = async (expected) => {
+      host.push({ event: "state.tabs", dropped: 2, data: { tabs: [], removed: [] } });
+      const deadline = Date.now() + 2000;
+      while (expected !== undefined && resyncs() < expected && Date.now() < deadline) await settle();
+      await settle();
+    };
+    for (let i = 1; i <= 5; i++) {
+      await drop(i);
+      assert.equal(resyncs(), i, `resync ${i}`);
+      clock += 100;
+    }
+    await drop();
+    assert.equal(resyncs(), 5, "the sixth drop in a row asks for nothing");
+    assert.equal(errors.at(-1)?.code, "state_desync");
+    clock += 120_000;
+    await drop();
+    assert.equal(resyncs(), 5, "it stays stopped until the plugin subscribes again");
+    runtime.ardia.downloads.onChange(() => {});
+    await settle();
+    await drop(6);
+    assert.equal(resyncs(), 6, "a new subscription starts over");
+  });
+
+  test("a drop long after the last resync starts a fresh streak with no wait", async () => {
+    let clock = 5_000_000;
+    const host = fakeHost({ hello });
+    const runtime = createHostRuntime(host.transport, { onError: () => {}, resyncBackoffMs: 60_000, now: () => clock });
+    await runtime.definePlugin({});
+    runtime.ardia.tabs.onChange(() => {});
+    await settle();
+    const resyncs = () => host.calls("state.subscribe").filter((m) => m.params.resync === true).length;
+    host.push({ event: "state.tabs", dropped: 1, data: { tabs: [], removed: [] } });
+    await settle();
+    assert.equal(resyncs(), 1);
+    clock += 31_000;
+    host.push({ event: "state.tabs", dropped: 1, data: { tabs: [], removed: [] } });
+    await settle();
+    assert.equal(resyncs(), 2, "outside the window, no backoff");
+  });
+
   test("a drop with no state listeners asks for nothing", async () => {
     const { host } = await started({ events: { "tab.activated": () => {} } });
     await settle();

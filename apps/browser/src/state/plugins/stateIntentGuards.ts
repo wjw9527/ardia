@@ -35,12 +35,13 @@ function panesOf(s: BrowserState, ids: string[]): string[] | GuardProblem {
 
 const refused = (message: string): GuardProblem => ({ code: "refused", message });
 
-function staysPut(s: BrowserState, ids: string[], profileId: string, zone: Zone | "kept"): GuardProblem | null {
+function staysPut(s: BrowserState, ids: string[], profileId: string, zone: Zone | "kept", windowId?: string): GuardProblem | null {
   for (const id of ids) {
     const t = s.tabs[id]!;
     if (t.profileId !== profileId) return refused(`Tab ${id} is in another profile than where it would go; a plugin can't move tabs between profiles.`);
     const own = zoneOfTab(s, id);
     if (zone === "kept" && own !== "unpinned") return refused(`Tab ${id} is ${ZONE_WORDS[own]}; a plugin moves only unpinned tabs to another window.`);
+    if (own !== "unpinned" && windowId !== undefined && t.windowId !== windowId) return refused(`Tab ${id} is ${ZONE_WORDS[own]}; a plugin moves pinned tabs only within their own window.`);
     if (zone !== "kept" && own !== zone) return refused(`Tab ${id} is ${ZONE_WORDS[own]} and would end up ${ZONE_WORDS[zone]}; pin or unpin it with tabs.pin or tabs.unpin first.`);
   }
   return null;
@@ -58,7 +59,7 @@ function moveProblem(s: BrowserState, op: Op): GuardProblem | null {
   } catch (error) {
     return { code: error instanceof OpError && error.code === "no_window" ? "refused" : "bad_request", message: error instanceof Error ? error.message.replace(/the ardia command/g, "this plugin") : "That isn't a place tabs can go." };
   }
-  if (dest) return staysPut(s, ids, dest.profileId, zoneOfPlacement(s, dest.placement));
+  if (dest) return staysPut(s, ids, dest.profileId, zoneOfPlacement(s, dest.placement), dest.windowId);
   const windowId = op.window as string | undefined;
   if (windowId) return staysPut(s, ids, s.windows[windowId]!.profileId, "kept");
   const first = s.tabs[ids[0]!]!;

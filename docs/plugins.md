@@ -551,7 +551,7 @@ later ones carry only what changed.
 | --- | --- | --- |
 | `tabs` | `state.tabs {initial?, tabs, removed}`: each tab's `id`, `windowId`, `index`, `url`, `title`, `pinned`, `active`, `groupId`, `muted` | `tabs` |
 | `workspace` | `state.workspace {initial?, windows, groups, removedWindows, removedGroups}`: windows (`kind`, `focused`, `activeTabId`, `tabCount`) and groups (`name`, `color`, `icon`, `collapsed`, `pinned`, `parentId`, `tabIds`). `focused` is the last window you were in that isn't private, so focusing a private window changes nothing here | `tabs` |
-| `navigation` | `state.navigation {commits}`: each `{tabId, windowId, url, title, sameDocument}` for a page the engine committed (`stateCommits.ts`, fed by the same commit reports as `tab.navigated`). An address typed or written but not yet committed is never one; a reload of the same address is, and an in-page change (`#part`, `pushState`) has `sameDocument: true`. `title` is `null` until the tab's title belongs to that address. Several commits of one tab between deliveries keep only the last. Nothing on subscribing | `tabs` |
+| `navigation` | `state.navigation {commits}`: each `{tabId, windowId, url, title, sameDocument}` for a page the engine committed (`stateCommits.ts`, fed by the same commit reports as `tab.navigated`). An address typed or written but not yet committed is never one; a reload of the same address is, and an in-page change (`#part`, `pushState`) has `sameDocument: true`. `title` is `null` until the tab's title belongs to that address. Several commits of one tab between deliveries keep only the last. Nothing on subscribing: the first report Ardia gets for a tab after that only sets where it stands, unless it is a page committed after the subscription began, so a page still loading when you subscribe never makes the older page look like a new commit | `tabs` |
 | `downloads` | `state.downloads {initial?, downloads, removed}`: `id`, `state`, `paused`, `dangerous`, `received`, `total`, `mimeType`, the file's name, and `url` only with `tabs` | nothing more |
 
 **Redaction** (`state/plugins/pluginEventRedaction.ts`), on every event, before it leaves Ardia:
@@ -571,13 +571,24 @@ later ones carry only what changed.
 **Delivery never holds up Ardia.** A commit only marks a topic changed. 100 ms later, once, Ardia builds each topic's
 view, diffs it against what that plugin last got and sends the difference; fifty commits in between are one event.
 The work happens in a timer, never inside a commit, so tab switching and typing never wait on it, and a plugin that is
-slow, hung or gone can't slow them down: sends go to the helper's own buffered channel. Each event is packed to at
-most 256 KB of UTF-8, so a big window arrives in parts (only the first `initial`), and what a plugin was sent is
-recorded only once every part went out; a send that fails leaves nothing recorded, so that topic's next event is a
-whole `initial` one. The channel drops the oldest waiting events when a helper falls 4 MB or 1,000 events behind and
-marks the next line `"dropped": N` (`docs/automation.md` › Limits). The SDK answers that by sending
-`state.subscribe {topics, resync: true}`, and Ardia then sends every subscribed topic whole again; a sidecar should do
-the same. Navigation commits lost that way don't come back. Subscriptions end with the run.
+slow, hung or gone can't slow them down: sends go to the helper's own buffered channel.
+
+- **Parts.** Each event's whole line on the wire, newline included, is at most 256 KB of UTF-8
+  (`stateEventPacking.ts`), so a big window arrives in parts and only the first is `initial`. A group with more tab ids
+  than one part holds arrives as several copies of the group, each with a page of `tabIds` and
+  `tabIdsPage: {index, count}`; join the pages in order.
+- **Rounds.** One delivery sends at most about 1 MB to a plugin. A bigger snapshot goes out over the next deliveries,
+  100 ms apart, and the last part of each round but the final one has `more: true`; later rounds aren't `initial`, they
+  carry the rows not sent yet. So a whole snapshot never has to fit in the channel's 4 MB at once.
+- **What counts as sent.** Ardia records a row as sent only once its part went out. A send that fails leaves nothing
+  recorded, so that topic's next event is a whole `initial` one.
+- **Drops and resync.** The channel drops the oldest waiting events when a helper falls 4 MB or 1,000 events behind,
+  and marks the next line `"dropped": N` (`docs/automation.md` › Limits). The SDK then sends
+  `state.subscribe {topics, resync: true}`, and Ardia sends every subscribed topic whole again; a sidecar should do the
+  same. A drop within 30 s of the last resync waits before resyncing, 1 s doubling up to 60 s. After 5 such drops in a
+  row the SDK stops and reports a `state_desync` error, until the plugin subscribes to a topic again. Navigation
+  commits lost to a drop don't come back.
+- Subscriptions end with the run.
 
 **Intents** (`state/plugins/stateIntents.ts`) are the only state a plugin may change this way, and each must be listed:
 
@@ -599,7 +610,8 @@ the same. Navigation commits lost that way don't come back. Subscriptions end wi
 - `tabs.move` and `tabs.group` never change a tab's profile or whether it is pinned, checked before anything moves and
   again just before it runs: a destination in another profile (an anchor, a group or a window showing another profile)
   is `refused`, so is a move that would put an unpinned tab among pins or a pinned one (a tile, a row or a member of a
-  pinned group) anywhere else, and so is a window move of a pinned tab. `tabs.group` takes only unpinned tabs of one
+  pinned group) anywhere else, and so is any move of a pinned tab to another window, whether by `window`, a `before`
+  or `after` tab or a group there. `tabs.group` takes only unpinned tabs of one
   window and profile. Use `tabs.pin` and `tabs.unpin` to change pins. Tabs in a split move with their split.
 - No profile, URL, group name lookup or `$N` reference is accepted, and no intent writes anything else: not
   `plugins.json`, consent or approvals, the Keychain or secrets, permissions, update pins, settings (muted sites

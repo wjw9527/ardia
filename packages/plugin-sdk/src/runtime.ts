@@ -12,12 +12,12 @@ import {
 } from "./protocol";
 import { PluginError, createRpc, errorMessage, isUnencodable, type Transport } from "./rpc";
 import { createSurfaceHost } from "./surfaces";
-import { createSubscriptionSync, STATE_PREFIX } from "./subscriptions";
+import { createSubscriptionSync, STATE_PREFIX, type ResyncOptions } from "./subscriptions";
 import { createRegistry, disposable, type CallContext, type CancelSignal, type Disposable, type PluginDefinition, type Registry } from "./types";
 
 export const SDK_VERSION = "2.0.0";
 
-export type HostRuntimeOptions = { onError?: (error: unknown) => void; stopGraceMs?: number };
+export type HostRuntimeOptions = { onError?: (error: unknown) => void; stopGraceMs?: number } & ResyncOptions;
 
 const DEFAULT_STOP_GRACE_MS = 5000;
 
@@ -133,7 +133,7 @@ export function createHostRuntime(transport: Transport, options: HostRuntimeOpti
     }
   };
 
-  const subscriptions = createSubscriptionSync(rpc, registry, report, () => activated && !stopped);
+  const subscriptions = createSubscriptionSync(rpc, registry, report, () => activated && !stopped, options);
 
   const state: ApiState = {
     values: {},

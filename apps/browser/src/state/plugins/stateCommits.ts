@@ -6,11 +6,15 @@ export type PageCommit = { tabId: string; url: string; at: number; sameDocument:
 const latest = new Map<string, { url: string; at: number }>();
 let collected = new Map<string, PageCommit>();
 let listener: (() => void) | null = null;
+let listeningSince = 0;
 
 export function notePluginStateCommit(tabId: string, url: string | undefined, at: number | undefined) {
   if (!listener || !url || at === undefined || !Number.isFinite(at) || url === "about:blank") return;
   const last = latest.get(tabId);
-  if (last && at <= last.at && url === last.url) return;
+  if (!last) {
+    latest.set(tabId, { url, at });
+    if (at <= listeningSince) return;
+  } else if (at <= last.at && url === last.url) return;
   const sameDocument = !!last && at <= last.at;
   latest.set(tabId, { url, at: Math.max(at, last?.at ?? at) });
   collected.set(tabId, { tabId, url, at, sameDocument, consent: collected.get(tabId)?.consent ?? consentToken() });
@@ -23,7 +27,7 @@ export function takePluginStateCommits(): PageCommit[] {
   return taken;
 }
 
-export function listenForPluginStateCommits(on: (() => void) | null, seed: () => Iterable<[string, string]> = () => []) {
+export function listenForPluginStateCommits(on: (() => void) | null) {
   if (!!on === !!listener) {
     listener = on;
     return;
@@ -31,9 +35,6 @@ export function listenForPluginStateCommits(on: (() => void) | null, seed: () =>
   listener = on;
   latest.clear();
   collected = new Map();
-  if (on) {
-    const now = Date.now();
-    for (const [tabId, url] of seed()) latest.set(tabId, { url, at: now });
-  }
+  listeningSince = Date.now();
   void reportPageCommits("pluginState", !!on).catch(() => {});
 }

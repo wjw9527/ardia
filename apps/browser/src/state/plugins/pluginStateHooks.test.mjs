@@ -10,7 +10,9 @@ const { usePlugins } = await import("./store.ts");
 const lifecycle = await import("./lifecycle.ts");
 const { ensurePluginActivated } = await import("./activation.ts");
 const { settledStops } = await import("./process.ts");
-const { flushStateEvents, stateSubscriberCount, packedEvents, STATE_EVENT_BUDGET_BYTES } = await import("./stateEvents.ts");
+const { flushStateEvents, stateSubscriberCount } = await import("./stateEvents.ts");
+const { packEvents, STATE_EVENT_BUDGET_BYTES, STATE_ROUND_BYTES } = await import("./stateEventPacking.ts");
+const wireBytes = (line) => new TextEncoder().encode(line).length + 1;
 const { notePluginStateCommit } = await import("./stateCommits.ts");
 const { consentLines } = await import("./consent.ts");
 const { redactedDownloads, pluginStateUrl } = await import("./pluginEventRedaction.ts");
@@ -412,23 +414,98 @@ test("a big window arrives in parts sized by encoded bytes, and only the first i
   });
   const lines = host.events.filter((e) => e.name === "watcher" && JSON.parse(e.line).event === "state.tabs").map((e) => e.line);
   assert.ok(lines.length > 1, "split into parts");
-  for (const line of lines) assert.ok(new TextEncoder().encode(line).length <= STATE_EVENT_BUDGET_BYTES + 1024, "each part fits its byte budget");
+  for (const line of lines) assert.ok(wireBytes(line) <= STATE_EVENT_BUDGET_BYTES, "each part, newline included, fits its byte budget");
   const parts = lines.map((l) => JSON.parse(l).data);
   assert.equal(parts[0].initial, true);
   assert.ok(parts.slice(1).every((p) => p.initial === undefined));
   assert.equal(parts.reduce((n, p) => n + p.tabs.length, 0), 601);
 });
 
-test("packedEvents never puts more than its budget in one event, keeps every row, and sends nothing when nothing changed", () => {
-  const rows = Array.from({ length: 50 }, (_, i) => ({ id: `t${i}`, title: "\u00e9".repeat(100) }));
-  const events = packedEvents({ tabs: rows, removed: ["x", "y"] }, true, 2048);
-  assert.ok(events.length > 1);
-  for (const e of events) assert.ok(new TextEncoder().encode(JSON.stringify(e)).length <= 2048 + 64);
-  assert.deepEqual(events.flatMap((e) => e.tabs).map((r) => r.id), rows.map((r) => r.id));
-  assert.deepEqual(events.flatMap((e) => e.removed), ["x", "y"]);
-  assert.equal(events[0].initial, true);
-  assert.deepEqual(packedEvents({ tabs: [], removed: [] }, false), []);
-  assert.deepEqual(packedEvents({ tabs: [], removed: [] }, true), [{ initial: true, tabs: [], removed: [] }]);
+test("packEvents measures the whole wire line, keeps every row, and sends nothing when nothing changed", () => {
+  const rows = Array.from({ length: 50 }, (_, i) => ({ key: `t${i}`, field: "tabs", value: { id: `t${i}`, title: "\u00e9".repeat(100) } }));
+  const removed = [{ key: "\u0000removed:x", field: "removed", value: "x" }, { key: "\u0000removed:y", field: "removed", value: "y" }];
+  const packed = packEvents("tabs", ["tabs", "removed"], [...rows, ...removed], { initial: true, time: Date.now(), budget: 2048 });
+  assert.ok(packed.lines.length > 1);
+  for (const line of packed.lines) assert.ok(wireBytes(line) <= 2048, `${wireBytes(line)} bytes`);
+  assert.deepEqual(packed.events.flatMap((e) => e.tabs).map((r) => r.id), rows.map((r) => r.key));
+  assert.deepEqual(packed.events.flatMap((e) => e.removed), ["x", "y"]);
+  assert.equal(packed.events[0].initial, true);
+  assert.equal(packed.held, false);
+  assert.deepEqual(packEvents("tabs", ["tabs", "removed"], [], { initial: false, time: 1 }).lines, []);
+  assert.deepEqual(packEvents("tabs", ["tabs", "removed"], [], { initial: true, time: 1 }).events, [{ initial: true, tabs: [], removed: [] }]);
+});
+
+test("a group with more tab ids than one event holds arrives in pages, each within 256 KB on the wire", () => {
+  const tabIds = Array.from({ length: 30000 }, (_, i) => `tab-${"x".repeat(20)}-${i}`);
+  const group = { id: "g1", windowId: "w1", name: "Huge", color: "blue", icon: null, collapsed: false, pinned: false, parentId: null, tabIds };
+  const packed = packEvents("workspace", ["windows", "groups", "removedWindows", "removedGroups"], [{ key: "g:g1", field: "groups", value: group }], { initial: true, time: Date.now() });
+  assert.ok(packed.lines.length > 1, "split");
+  for (const line of packed.lines) assert.ok(wireBytes(line) <= STATE_EVENT_BUDGET_BYTES, `${wireBytes(line)} bytes`);
+  const pages = packed.events.flatMap((e) => e.groups);
+  assert.ok(pages.every((p, i) => p.id === "g1" && p.tabIdsPage.index === i && p.tabIdsPage.count === pages.length));
+  assert.deepEqual(pages.flatMap((p) => p.tabIds), tabIds);
+});
+
+test("a snapshot bigger than one flush's round goes out over several flushes, never all at once", async () => {
+  const long = "a".repeat(8000);
+  await subscribed(WATCHER, ["tabs"], () => {
+    const w = S().createWindow({ url: "https://a.example/" });
+    for (let i = 0; i < 200; i++) S().newTab(w, { url: `https://n${i}.example/${long}` });
+  });
+  const first = host.events.filter((e) => e.name === "watcher").map((e) => e.line);
+  const firstBytes = first.reduce((n, line) => n + wireBytes(line), 0);
+  assert.ok(firstBytes <= STATE_ROUND_BYTES + 16 * 1024, `${firstBytes} bytes in one flush`);
+  const parts = first.map((l) => JSON.parse(l).data);
+  assert.equal(parts[0].initial, true);
+  assert.equal(parts.at(-1).more, true, "the last part says more follows");
+  host.events.length = 0;
+  flushStateEvents();
+  const rest = stateEvents("watcher", "tabs");
+  assert.ok(rest.length >= 1);
+  assert.ok(rest.every((p) => p.initial === undefined));
+  const ids = new Set([...parts, ...rest].flatMap((p) => p.tabs.map((t) => t.id)));
+  assert.equal(ids.size, 201, "every tab arrives exactly once across the rounds");
+  host.events.length = 0;
+  flushStateEvents();
+  assert.equal(host.events.length, 0, "nothing left once it's all out");
+});
+
+test("subscribing while a page is still loading never reports the older committed page as a new commit", async () => {
+  let w;
+  await subscribed(WATCHER, ["navigation"], () => (w = S().createWindow({ url: "https://old.example/" })));
+  host.events.length = 0;
+  const tab = activeTabId(S(), w);
+  S().navigate(tab, "https://pending.example/");
+  const committedBefore = Date.now() - 5000;
+  notePluginStateCommit(tab, "https://old.example/", committedBefore);
+  flushStateEvents();
+  assert.deepEqual(stateEvents("watcher", "navigation"), [], "the first report only sets the baseline");
+  notePluginStateCommit(tab, "https://old.example/", committedBefore);
+  flushStateEvents();
+  assert.deepEqual(stateEvents("watcher", "navigation"), []);
+  notePluginStateCommit(tab, "https://pending.example/", Date.now() + 10);
+  flushStateEvents();
+  assert.deepEqual(stateEvents("watcher", "navigation").flatMap((e) => e.commits).map((c) => [c.url, c.sameDocument]), [["https://pending.example/", false]]);
+});
+
+test("a pinned tab never moves to another window, even beside a pinned tab there", async () => {
+  await enable(ACTOR);
+  const w1 = S().createWindow({ url: "https://a.example/" });
+  const p1 = S().newTab(w1, { url: "https://p1.example/" });
+  S().pinTabs([p1], true, true);
+  const w2 = S().createWindow({ url: "https://b.example/" });
+  const p2 = S().newTab(w2, { url: "https://p2.example/" });
+  S().pinTabs([p2], true, true);
+  assert.equal(S().tabs[p1].profileId, S().tabs[p2].profileId, "same profile, so only the window differs");
+  const run = await activated("actor");
+  const reply = await ask("actor", "state.intent", { intent: "tabs.move", args: { tabs: [p1], before: p2 } }, run);
+  assert.equal(reply.error?.code, "refused");
+  assert.match(reply.error.message, /within their own window/);
+  assert.equal(S().tabs[p1].windowId, w1);
+  assert.notEqual(S().tabs[p1].pin, null);
+  const p3 = S().newTab(w1, { url: "https://p3.example/" });
+  S().pinTabs([p3], true, true);
+  assert.equal((await ask("actor", "state.intent", { intent: "tabs.move", args: { tabs: [p1], before: p3 } }, run)).result?.ok, true, "within its own window it may move");
 });
 
 test("resync after the channel dropped events sends every subscribed topic whole again", async () => {

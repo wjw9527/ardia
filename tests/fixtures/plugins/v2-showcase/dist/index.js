@@ -924,12 +924,21 @@
   }
 
   var STATE_PREFIX = "state.";
-  function createSubscriptionSync(rpc, registry, report, live) {
+  var RESYNC_WINDOW_MS = 3e4;
+  var MAX_RESYNC_STREAK = 5;
+  var MAX_RESYNC_DELAY_MS = 6e4;
+  function createSubscriptionSync(rpc, registry, report, live, options = {}) {
     let acknowledgedEvents = "";
     let acknowledgedTopics = "";
     let queued = false;
     let inFlight = false;
     let resyncing = false;
+    let waiting = false;
+    let streak = 0;
+    let lastResyncAt = Number.NEGATIVE_INFINITY;
+    let gaveUp = false;
+    const now = options.now ?? (() => Date.now());
+    const backoff = options.resyncBackoffMs ?? 1e3;
     const wantedEvents = () => [...registry.events.keys()].filter((name) => name !== "plugin.values").sort();
     const wantedTopics = () => [...registry.state.keys()].sort();
     const sync = () => {
@@ -964,6 +973,8 @@
           try {
             await rpc.request(HOST_METHODS.stateSubscribe, { topics });
             acknowledgedTopics = topicSignature;
+            gaveUp = false;
+            streak = 0;
           } catch (error) {
             failedTopics = true;
             report(error);
@@ -986,8 +997,10 @@
       }
     }
     async function resync() {
+      waiting = false;
       if (!live() || resyncing || !registry.state.size) return;
       resyncing = true;
+      lastResyncAt = now();
       try {
         const topics = wantedTopics();
         await rpc.request(HOST_METHODS.stateSubscribe, { topics, resync: true });
@@ -998,8 +1011,21 @@
         resyncing = false;
       }
     }
+    const later = (ms, task) => {
+      const start = globalThis.setTimeout;
+      if (ms <= 0 || !start) return void enqueueMicrotask(task);
+      start(task, ms);
+    };
     const noteDropped = (dropped) => {
-      if (typeof dropped === "number" && dropped > 0) void resync();
+      if (typeof dropped !== "number" || !(dropped > 0) || !registry.state.size || gaveUp || waiting || resyncing) return;
+      streak = now() - lastResyncAt < RESYNC_WINDOW_MS ? streak + 1 : 0;
+      if (streak >= MAX_RESYNC_STREAK) {
+        gaveUp = true;
+        report(new PluginError("state_desync", `Ardia's channel dropped state events ${MAX_RESYNC_STREAK} times in a row right after a resync, so state events stopped resyncing. Subscribe again to start over.`));
+        return;
+      }
+      waiting = true;
+      later(streak === 0 ? 0 : Math.min(backoff * 2 ** (streak - 1), MAX_RESYNC_DELAY_MS), () => void resync());
     };
     return { sync, deliverState, noteDropped };
   }
@@ -1094,7 +1120,7 @@
         cancelTimer(timer);
       }
     };
-    const subscriptions = createSubscriptionSync(rpc, registry, report, () => activated && !stopped);
+    const subscriptions = createSubscriptionSync(rpc, registry, report, () => activated && !stopped, options);
     const state = {
       values: {},
       info: { name: "", app: "", version: "", protocol: 0 },
