@@ -311,7 +311,7 @@ export const SidebarUrlField = memo(function SidebarUrlField({ tab, palette, win
       </ContextMenuArea>
       <ToolbarRowContext.Provider value={TOOLBAR_ROWS.regular}>
         <FieldButtons tab={tab} palette={palette} onFocus={onFocus} popover={popover} toggleSiteControls={openSiteControls} accessory={shown.extensions ? accessory : null} quiet={!shown.page}>
-          {shown.page && <PageButton tab={tab} palette={palette} windowId={windowId} />}
+          {shown.page && <CopyUrlButton tab={tab} palette={palette} windowId={windowId} />}
           {shown.siteControls && <Button variant="icon" toolbar palette={palette} icon="slider.horizontal.3" look="field" onPress={openSiteControls} active={popover === "siteControls"} tooltip="Site Controls" />}
         </FieldButtons>
       </ToolbarRowContext.Provider>
