@@ -139,6 +139,7 @@ export function createHostRuntime(transport: Transport, options: HostRuntimeOpti
     values: {},
     info: { name: "", app: "", version: "", protocol: 0 },
     subscriptionsChanged: () => subscriptions.sync(),
+    report,
   };
   const ardia = createArdia(rpc, registry, state);
   const surfaces = createSurfaceHost(rpc, registry, report);

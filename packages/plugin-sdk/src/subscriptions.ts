@@ -34,23 +34,33 @@ export function createSubscriptionSync(rpc: Rpc, registry: Registry, report: (er
     const topicSignature = topics.join(",");
     if (signature === acknowledgedEvents && topicSignature === acknowledgedTopics) return;
     inFlight = true;
-    let failed = false;
+    let failedEvents = false;
+    let failedTopics = false;
     try {
       if (signature !== acknowledgedEvents) {
-        await rpc.request(M.subscribe, { events });
-        acknowledgedEvents = signature;
+        try {
+          await rpc.request(M.subscribe, { events });
+          acknowledgedEvents = signature;
+        } catch (error) {
+          failedEvents = true;
+          report(error);
+        }
       }
       if (topicSignature !== acknowledgedTopics) {
-        await rpc.request(M.stateSubscribe, { topics });
-        acknowledgedTopics = topicSignature;
+        try {
+          await rpc.request(M.stateSubscribe, { topics });
+          acknowledgedTopics = topicSignature;
+        } catch (error) {
+          failedTopics = true;
+          report(error);
+        }
       }
-    } catch (error) {
-      failed = true;
-      report(error);
     } finally {
       inFlight = false;
     }
-    if (!failed || wantedEvents().join(",") !== signature || wantedTopics().join(",") !== topicSignature) sync();
+    const eventsMoved = wantedEvents().join(",") !== signature;
+    const topicsMoved = wantedTopics().join(",") !== topicSignature;
+    if ((!failedEvents && !failedTopics) || eventsMoved || topicsMoved) sync();
   }
 
   function deliverState(name: string, data: Record<string, unknown>, time: number | undefined) {

@@ -529,7 +529,13 @@ each change, and typed requests for tab and group changes that Ardia's own reduc
 ardia.tabs.onChange(({ initial, tabs, removed }) => mirror.apply(initial, tabs, removed));
 ardia.navigation.onCommit(({ tabId, url }) => seen.add(url));
 ardia.workspace.onChange(({ windows, groups }) => draw(windows, groups));
-ardia.downloads.onChange(({ downloads }) => badge(downloads.filter((d) => d.state === "downloading").length));
+const downloads = new Map<string, StateDownload>();
+ardia.downloads.onChange(({ initial, downloads: changed, removed }) => {
+  if (initial) downloads.clear();
+  for (const d of changed) downloads.set(d.id, d);
+  for (const id of removed) downloads.delete(id);
+  badge([...downloads.values()].filter((d) => d.state === "downloading").length);
+});
 const { group } = await ardia.tabs.group([a, b], { name: "Reading", color: "blue" });
 await ardia.tabs.move([c], { before: a });
 await ardia.workspace.updateGroup(group!, { collapsed: true });

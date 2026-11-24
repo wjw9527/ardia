@@ -234,11 +234,19 @@ test("a hostile value in any intent field is refused before it reaches a reducer
   S().hydrate({});
   const w = S().createWindow({ url: "https://a.test/" });
   const tab = activeTabId(S(), w);
+  const other = S().newTab(w, { url: "https://b.test/" });
+  const group = S().createGroup([other], { name: "G" });
+  assert.ok(S().groups[group], "the fixture's group exists");
+  const defaults = (spec) => {
+    const args = { tabs: [tab], tab, group, collapsed: false };
+    for (const key of Object.keys(args)) if (!Object.hasOwn(spec.fields, key)) delete args[key];
+    return args;
+  };
+  for (const [intent, spec] of Object.entries(INTENT_SPECS)) assert.ok("op" in parseIntent(intent, defaults(spec)), `${intent}'s fixture parses, so each field below is what's tested`);
   for (const [intent, spec] of Object.entries(INTENT_SPECS)) {
     for (const field of Object.keys(spec.fields)) {
       for (const { value } of HOSTILE_VALUES) {
-        const args = { tabs: [tab], tab, group: "g-none", [field]: value };
-        for (const key of Object.keys(args)) if (!Object.hasOwn(spec.fields, key)) delete args[key];
+        const args = { ...defaults(spec), [field]: value };
         const parsed = parseIntent(intent, args);
         if (!("op" in parsed)) {
           assert.ok(parsed.code === "bad_request" || parsed.code === "refused", show(value));

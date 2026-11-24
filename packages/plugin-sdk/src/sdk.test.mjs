@@ -856,6 +856,36 @@ describe("createHostRuntime", () => {
     assert.deepEqual(seen, [false, true, false]);
   });
 
+  test("a navigation listener that throws on one commit still hears the rest", async () => {
+    const seen = [];
+    const { host, runtime, errors } = await started({});
+    runtime.ardia.navigation.onCommit((commit) => {
+      if (commit.tabId === "t1") throw new Error("only t1 breaks");
+      seen.push(commit.tabId);
+    });
+    await settle();
+    host.push({ event: "state.navigation", data: { commits: [{ tabId: "t1" }, { tabId: "t2" }, { tabId: "t3" }] } });
+    await settle();
+    assert.deepEqual(seen, ["t2", "t3"]);
+    assert.equal(errors.length, 1);
+  });
+
+  test("a failed hook subscription doesn't keep state topics from subscribing", async () => {
+    const { host, runtime, errors } = await started({}, {
+      subscribe: () => {
+        throw Object.assign(new Error("hooks refused"), { code: "refused" });
+      },
+    });
+    runtime.ardia.hooks.on("tab.activated", () => {});
+    runtime.ardia.tabs.onChange(() => {});
+    await settle();
+    assert.equal(host.calls("subscribe").length, 1);
+    assert.deepEqual(host.calls("state.subscribe").map((m) => m.params), [{ topics: ["tabs"] }]);
+    assert.equal(errors.length, 1);
+    await settle();
+    assert.equal(host.calls("subscribe").length, 1, "an unchanged failed request isn't retried on its own");
+  });
+
   test("a drop with no state listeners asks for nothing", async () => {
     const { host } = await started({ events: { "tab.activated": () => {} } });
     await settle();

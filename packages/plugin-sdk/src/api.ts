@@ -52,6 +52,7 @@ export type ApiState = {
   values: Record<string, unknown>;
   info: PluginInfo;
   subscriptionsChanged(): void;
+  report(error: unknown): void;
 };
 
 function unwrap(result: unknown, key: string): unknown {
@@ -214,7 +215,13 @@ export function createArdia(rpc: Rpc, registry: Registry, state: ApiState) {
     navigation: {
       onCommit: (listener: (commit: NavigationCommit, event: { name: string; time: number | undefined }) => void): Disposable =>
         stateApi.subscribe("navigation", (change, event) => {
-          for (const commit of change.commits ?? []) listener(commit, event);
+          for (const commit of change.commits ?? []) {
+            try {
+              listener(commit, event);
+            } catch (error) {
+              state.report(error);
+            }
+          }
         }),
     },
     downloads: {
