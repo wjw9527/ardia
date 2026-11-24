@@ -34,7 +34,8 @@ namespace {
 constexpr char kTopic[] = "cliDevTools";
 constexpr size_t kMaxSessions = 32;
 constexpr size_t kMaxSessionsPerOwner = 8;
-constexpr size_t kMaxEventBytes = 900 * 1024;
+constexpr size_t kMaxSocketEventBytes = 900 * 1024;
+constexpr size_t kMaxInspectEventBytes = 16 * 1024 * 1024;
 constexpr int kMaxTimeoutMs = 120000;
 
 constexpr std::array<std::string_view, 18> kInspectionMethods = {
@@ -203,7 +204,7 @@ class CliSession : public content::WebContentsObserver {
     if (!child.empty()) {
       payload.Set("sessionId", child);
     }
-    if (bytes > kMaxEventBytes) {
+    if (bytes > (full_ ? kMaxSocketEventBytes : kMaxInspectEventBytes)) {
       ++CliCounts().session_events_cut;
       payload.Set("cut", true);
       payload.Set("bytes", static_cast<double>(bytes));
