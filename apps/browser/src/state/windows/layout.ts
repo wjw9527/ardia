@@ -94,6 +94,14 @@ export const pageFrameIn = (s: BrowserState, windowId: string): number =>
     tabsHidden: autoHidesTabsIn(s, windowId),
   });
 
+export const roundsZeroSidebarFrameIn = (s: BrowserState, windowId: string): boolean =>
+  !!s.windows[windowId]?.fullScreen && s.windows[windowId]?.kind !== "small" && tabLayoutOf(s, windowId) === "sidebar" && autoHidesTabsIn(s, windowId);
+
+export function useRoundsZeroSidebarFrame(): boolean {
+  const windowId = useWindowId();
+  return useWindowSettings(windowId, (s) => roundsZeroSidebarFrameIn(s, windowId));
+}
+
 const toolbarless = (s: BrowserState, windowId: string): boolean => addressBarInSidebar(s, windowId) || minimalismIn(s, windowId);
 
 const sidebarShownOnLeft = (s: BrowserState, windowId: string): boolean =>

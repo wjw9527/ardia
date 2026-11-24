@@ -6,7 +6,7 @@ globalThis.__DEV__ = false;
 const { useBrowser } = await import("./store.ts");
 const { tabsShownIn } = await import("./model.ts");
 const { watchSettings, watchTabRecord, watchWindowSettings } = await import("./keyedWatch.ts");
-const { addressBarInSidebar, minimalismIn, pageFrameIn } = await import("../windows/layout.ts");
+const { addressBarInSidebar, minimalismIn, pageFrameIn, roundsZeroSidebarFrameIn } = await import("../windows/layout.ts");
 const { splitOf } = await import("../splits/splits.ts");
 await import("../../test-native/index.ts");
 
@@ -21,7 +21,7 @@ function session() {
   return { w, other, ids };
 }
 
-const layoutOf = (w) => `${tabsShownIn(S(), w)}:${addressBarInSidebar(S(), w)}:${minimalismIn(S(), w)}:${pageFrameIn(S(), w)}`;
+const layoutOf = (w) => `${tabsShownIn(S(), w)}:${addressBarInSidebar(S(), w)}:${minimalismIn(S(), w)}:${pageFrameIn(S(), w)}:${roundsZeroSidebarFrameIn(S(), w)}`;
 
 test("the default frame disappears only in fullscreen with the sidebar hidden", () => {
   const { w } = session();
@@ -30,7 +30,9 @@ test("the default frame disappears only in fullscreen with the sidebar hidden", 
     for (const fullScreen of [true, false]) {
       for (const autoHideTabs of [true, false]) {
         const state = { ...base, windows: { ...base.windows, [w]: { ...base.windows[w], tabLayout, fullScreen, autoHideTabs } } };
-        assert.equal(pageFrameIn(state, w), tabLayout === "sidebar" && fullScreen && autoHideTabs ? 0 : base.settings.pageFrame);
+        const rounded = tabLayout === "sidebar" && fullScreen && autoHideTabs;
+        assert.equal(pageFrameIn(state, w), rounded ? 0 : base.settings.pageFrame);
+        assert.equal(roundsZeroSidebarFrameIn(state, w), rounded);
       }
     }
   }
