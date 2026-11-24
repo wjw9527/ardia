@@ -68,7 +68,7 @@ export function useRowSurfaceLayer({
         pointerEvents="none"
         fill={hex(fill)}
         cornerRadius={cornerRadius}
-        borderWidth={border}
+        borderWidth={selected ? 0 : border}
         borderColor={stroke === undefined ? undefined : hex(stroke)}
         borderColors={selected ? selectedBorder.map(hex) : undefined}
         shadowColor={selected ? shadowColor : undefined}

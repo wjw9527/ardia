@@ -23,6 +23,19 @@ function session() {
 
 const layoutOf = (w) => `${tabsShownIn(S(), w)}:${addressBarInSidebar(S(), w)}:${minimalismIn(S(), w)}:${pageFrameIn(S(), w)}`;
 
+test("the default frame disappears only in fullscreen with the sidebar hidden", () => {
+  const { w } = session();
+  const base = S();
+  for (const tabLayout of ["sidebar", "top"]) {
+    for (const fullScreen of [true, false]) {
+      for (const autoHideTabs of [true, false]) {
+        const state = { ...base, windows: { ...base.windows, [w]: { ...base.windows[w], tabLayout, fullScreen, autoHideTabs } } };
+        assert.equal(pageFrameIn(state, w), tabLayout === "sidebar" && fullScreen && autoHideTabs ? 0 : base.settings.pageFrame);
+      }
+    }
+  }
+});
+
 test("a window's layout reads wake its window key whenever they change", () => {
   const { w, other, ids } = session();
   const woken = new Set();

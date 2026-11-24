@@ -11,19 +11,21 @@ test("every default passes its own check", () => {
   for (const key of SETTING_KEYS) assert.ok(SETTING_SPECS[key].valid(DEFAULT_SETTINGS[key]), key);
 });
 
-test("page frame zero options and borderless mode are off by default and synced", () => {
+test("page frame zero options and borderless mode have the custom defaults and are synced", () => {
   for (const key of ["borderlessMode", "pageFrameZeroInFullScreen", "pageFrameZeroWhenTabsHidden"]) {
-    assert.equal(DEFAULT_SETTINGS[key], false, key);
+    const expected = key === "pageFrameZeroWhenTabsHidden";
+    assert.equal(DEFAULT_SETTINGS[key], expected, key);
     assert.ok(SETTING_SPECS[key].synced, key);
     assert.ok(SYNCED_SETTINGS.includes(key), key);
     assert.equal(parseSettings({ [key]: true })[key], true, key);
-    assert.equal(parseSettings({ [key]: "yes" })[key], false, key);
+    assert.equal(parseSettings({ [key]: false })[key], false, key);
+    assert.equal(parseSettings({ [key]: "yes" })[key], expected, key);
   }
 });
 
 test("turning on Zero in full screen also turns on Zero in full screen when tabs are hidden", async () => {
   const { choose } = await import("./settings.ts");
-  const base = { settings: { ...DEFAULT_SETTINGS }, settingsMeta: { chosen: [], inferred: [] } };
+  const base = { settings: { ...DEFAULT_SETTINGS, pageFrameZeroWhenTabsHidden: false }, settingsMeta: { chosen: [], inferred: [] } };
   const onlyFs = choose(base, { pageFrameZeroInFullScreen: true });
   assert.equal(onlyFs.settings.pageFrameZeroInFullScreen, true);
   assert.equal(onlyFs.settings.pageFrameZeroWhenTabsHidden, true);
@@ -33,7 +35,7 @@ test("turning on Zero in full screen also turns on Zero in full screen when tabs
 });
 
 test("sync also turns on the dependent page-frame flag", () => {
-  S().hydrate({ settings: {} });
+  S().hydrate({ settings: { pageFrameZeroWhenTabsHidden: false } });
   settingsAdapter.apply(new Map([["set:pageFrameZeroInFullScreen", { v: true }]]), ["set:pageFrameZeroInFullScreen"]);
   assert.equal(S().settings.pageFrameZeroInFullScreen, true);
   assert.equal(S().settings.pageFrameZeroWhenTabsHidden, true);

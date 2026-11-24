@@ -112,7 +112,7 @@ function savedFromOlderBuild({ settings, chosen = false }) {
   shell.docs.set("sync-state.nns", `sealed:${JSON.stringify({ covers: -1, scopes: { app }, version: 1 })}`);
   const doc = { v: 1, enabled: true, folder: "/sync", deviceId: "me", clock: null, types: { bookmarks: true, history: true, tabs: true, pinned: true, passwords: true, extensions: true, settings }, profiles: {}, lastSyncedAt: null, setupAt: 1, joining: false };
   shell.docs.set("sync.json", JSON.stringify(doc));
-  if (chosen) S().updateSettings({ selectedTabGlow: "soft" });
+  if (chosen) S().updateSettings({ selectedTabGlow: "full" });
 }
 
 const published = (key) => [...folder.values()].map((f) => JSON.parse(f.payload)).some((f) => f.ops?.some((op) => op.k === key));
@@ -137,7 +137,7 @@ test("with settings sync off at the upgrade, the setting lands once settings syn
   engine.startSync();
   await settle();
   await engine.syncNow();
-  assert.equal(S().settings.selectedTabGlow, "full", "nothing applies while settings sync is off");
+  assert.equal(S().settings.selectedTabGlow, "soft", "nothing applies while settings sync is off");
   engine.setTypeSynced("settings", true);
   await engine.syncNow();
   assert.equal(S().settings.selectedTabGlow, "off", "it applies once it's on");
@@ -151,5 +151,5 @@ test("a setting chosen on this Mac isn't replaced by the one an older build rece
   await settle();
   await engine.syncNow();
   await engine.syncNow();
-  assert.equal(S().settings.selectedTabGlow, "soft");
+  assert.equal(S().settings.selectedTabGlow, "full");
 });

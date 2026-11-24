@@ -368,7 +368,7 @@ function SidebarDock({
               style={{ position: "absolute", top: 0, bottom: 0, [edgeSide]: -bleed, [right ? "left" : "right"]: 0, opacity: panelOn }}
               onLayout={(e) => setPanelHeight(e.nativeEvent.layout.height)}
             >
-              <Panel fill={theme.windowTint[0]} radius={peekAt.radius} shadow={SHADOWS.sidebarPeek} style={StyleSheet.absoluteFill} />
+              <Panel fill={theme.windowTint[0]} radius={peekAt.radius} border={null} shadow={SHADOWS.sidebarPeek} style={StyleSheet.absoluteFill} />
               {peeking && (
                 <View style={[StyleSheet.absoluteFill, { borderRadius: peekAt.radius, overflow: "hidden" }]}>
                   <WindowBackdrop

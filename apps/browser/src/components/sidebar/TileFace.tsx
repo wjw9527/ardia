@@ -206,13 +206,13 @@ export function RestingTile({ width, selected, hovered, pressed, bare = false, c
         width,
         height: layout.pinnedHeight,
         borderRadius: radius.pinned,
-        borderWidth: selected ? 1 : StyleSheet.hairlineWidth,
-        borderColor: selected ? tokens.dragBorder : theme.pinnedRestingStroke,
+        borderWidth: selected ? 1 : 0,
+        borderColor: selected ? tokens.dragBorder : undefined,
         alignItems: "center",
         justifyContent: "center",
       }}
     >
-      <HoverSwap shown={pressed || hovered || selected} instant={selected} rest={theme.pinnedResting} color={pressed ? theme.tabPressed : theme.tabHover} radius={radius.pinned} underBorder={selected ? 1 : StyleSheet.hairlineWidth} />
+      <HoverSwap shown={pressed || hovered || selected} instant={selected} rest={theme.pinnedResting} color={pressed ? theme.tabPressed : theme.tabHover} radius={radius.pinned} underBorder={selected ? 1 : 0} />
       {children}
     </View>
   );

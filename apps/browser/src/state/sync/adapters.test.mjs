@@ -2085,7 +2085,7 @@ test("settings received while this Mac ran a version that didn't sync them take 
   b.with(() => S().updateSettings({ sidebarTextContrast: "high" }));
   a.with(() => S().updateSettings({ selectedTabGlow: "off", sidebarTextContrast: "standard" }));
   await syncAll([a, b]);
-  assert.equal(b.with(() => S().settings.selectedTabGlow), "full", "the older version leaves it alone");
+  assert.equal(b.with(() => S().settings.selectedTabGlow), "soft", "the older version leaves it alone");
   assert.ok("set:selectedTabGlow" in b.scopes.app.base && !b.scopes.app.unapplied.includes("set:selectedTabGlow"), "and counts it as applied");
 
   b.settings = undefined;

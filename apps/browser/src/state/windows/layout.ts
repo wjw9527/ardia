@@ -65,7 +65,7 @@ export function openingLightsCenter(s: BrowserState, windowId: string): LightsPl
     borderlessMode: s.settings.borderlessMode || minimalismIn(s, windowId),
     zeroInFullScreen: s.settings.pageFrameZeroInFullScreen,
     fullScreen: !!w.fullScreen,
-    zeroWhenTabsHidden: s.settings.pageFrameZeroWhenTabsHidden,
+    zeroWhenTabsHidden: s.settings.pageFrameZeroWhenTabsHidden && tabLayoutOf(s, windowId) === "sidebar",
     tabsHidden: autoHidesTabsIn(s, windowId),
   });
   const base = sidebarAddressChosen(s.settings) ? ARC_LIGHTS_CENTER : toolbarLightsCenter(s.settings.compactToolbar, frame);
@@ -79,7 +79,7 @@ export function usePageFrameInset(): number {
       borderlessMode: s.settings.borderlessMode || minimalismIn(s, windowId),
       zeroInFullScreen: s.settings.pageFrameZeroInFullScreen,
       fullScreen: !!s.windows[windowId]?.fullScreen,
-      zeroWhenTabsHidden: s.settings.pageFrameZeroWhenTabsHidden,
+      zeroWhenTabsHidden: s.settings.pageFrameZeroWhenTabsHidden && tabLayoutOf(s, windowId) === "sidebar",
       tabsHidden: autoHidesTabsIn(s, windowId),
     }),
   );
@@ -90,7 +90,7 @@ export const pageFrameIn = (s: BrowserState, windowId: string): number =>
     borderlessMode: s.settings.borderlessMode || minimalismIn(s, windowId),
     zeroInFullScreen: s.settings.pageFrameZeroInFullScreen,
     fullScreen: !!s.windows[windowId]?.fullScreen,
-    zeroWhenTabsHidden: s.settings.pageFrameZeroWhenTabsHidden,
+    zeroWhenTabsHidden: s.settings.pageFrameZeroWhenTabsHidden && tabLayoutOf(s, windowId) === "sidebar",
     tabsHidden: autoHidesTabsIn(s, windowId),
   });
 

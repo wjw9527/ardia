@@ -6,7 +6,6 @@ import { GlassFill, useGlass } from "../ui/Glass";
 import { SIDEBAR_FIELD } from "./geometry";
 import { useSidebarTokens } from "./tokens";
 
-const FIELD_BORDER = StyleSheet.hairlineWidth;
 const FIELD_BUTTON_BOX = 24;
 const FIELD_BUTTON = {
   box: FIELD_BUTTON_BOX,
@@ -36,8 +35,6 @@ export const SidebarFieldFill = memo(function SidebarFieldFill({
         StyleSheet.absoluteFill,
         {
           borderRadius: SIDEBAR_FIELD.radius,
-          borderWidth: FIELD_BORDER,
-          borderColor: theme.pinnedRestingStroke,
           backgroundColor: hovered ? theme.tabHover : theme.pinnedResting,
         },
       ]}
