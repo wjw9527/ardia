@@ -80,8 +80,10 @@ definePlugin({ views: { releases: Releases }, commands: { refresh: async () => a
   tooltip.
 - **Hooks**: `useState`, `useReducer`, `useEffect`, `useLayoutEffect`, `useMemo`, `useCallback`, `useRef`,
   `useContext`, `useId`, and `useSurface` (which surface and window a view is in).
-- **`ardia`**: `tabs`, `workspace`, `activePage`, `commands`, `tools`, `storage`, `secrets`, `net.fetch`, `programs`, `ui`
-  (`toast`, `quickPick`, `inputBox`, `confirm`), `panels`, `toolbar` (title, badge, icon updates), `omnibox`, `decide` and `pages`.
+- **`ardia`**: `tabs`, `workspace`, `navigation`, `downloads`, `state`, `activePage`, `commands`, `tools`, `storage`,
+  `secrets`, `net.fetch`, `programs`, `ui` (`toast`, `quickPick`, `inputBox`, `confirm`), `panels`, `toolbar` (title,
+  badge, icon updates), `omnibox`, `decide` and `pages`. State events and intents are
+  [below](#state-events-and-intents).
   Each call is a request on the channel and is held to the manifest's permissions on Ardia's side; the SDK never
   decides what a plugin may do.
 - **Rendering.** The reconciler batches a commit into one `surface.render` with the whole tree; Ardia checks it
@@ -403,6 +405,7 @@ plugin that isn't needed yet costs nothing: no host process, no memory. The firs
 | `storage` | `true` | A private key-value store in `PluginData/<name>/storage.json`, at most 2 MB in all and 256 KB a value (`plugin_storage_writes`). `storage.get` answers `{found: true, value}` or `{found: false}`. A file Ardia can't read or parse, an empty one included, fails every call; Ardia never overwrites it with an empty store |
 | `secrets` | `true` | Keychain items of its own (`ardia.plugin.<name>.<key>`, at most 64, 16 KB each; `plugin_secret_writes`). If the Keychain's list of them can't be read, Ardia keeps it, fails secret writes and deletes, and says removing the plugin left its secrets |
 | `network` | `false`, `"*"`, or 1 to 32 host patterns | main's `fetch` reaches only these hosts (`*.example.com` included); a sidecar gets the network as in v1. A web view the plugin shows (its page, a `file` panel) goes online only with `"*"`: WebKit's traffic can't be held to a list of hosts, so with a list it stays offline and the plugin reaches its hosts through `net.fetch` |
+| `state` | `{"events"?, "intents"?}` or `false` | `events`: any of `tabs`, `workspace`, `navigation` (each needs `tabs`) and `downloads`, heard after Ardia commits them, redacted. `intents`: any of `tabs.group`, `tabs.ungroup`, `tabs.move`, `tabs.pin`, `tabs.unpin`, `tabs.mute`, `tabs.unmute`, `tabs.activate` and `groups.update` (needs `tabs: write`). See [State events and intents](#state-events-and-intents) |
 | `control` | `true` | Turning it on turns on `cliControl`, unless you turned control off yourself: an Off you chose wins, and the consent sheet points to the switch, Settings › Advanced › Let programs control Ardia. While control is on, any program you run has the `ardia` command's reach: the control socket and the engine's token connection, a full DevTools client of the browser (every tab and page, signed-in sites and their cookies, downloads and uploads; `docs/cli.md`). So the consent sheet and the plugin's page in Settings › Plugins put that first ("Turns on control in Settings › Advanced. While it's on, any program you run can fully control Ardia: every tab and page, your signed-in sites and their cookies, and uploads and downloads of any file on this Mac"; "While control is on …" when you turned control off yourself, and naming the commands Ardia runs for it after updates when it has any), and its row in the list, the official ones' included (also while an update has failed), says "Can fully control Ardia" (`fullControlLine`, `FULL_CONTROL_SUMMARY` in `state/plugins/consent.ts`) |
 
 The old list form (`["tabs", "network"]`) still reads, as above. Contributions grant their own reach and are shown on
@@ -515,6 +518,78 @@ app, `{permission: "deny"}` for a permission prompt. The rules:
   (`plugin_decide_timeouts`) and the navigation goes on.
 - When more than one plugin answers, the first in plugin order wins.
 - URLs are cut to the plugin's permissions, as everywhere.
+
+### State events and intents
+
+A public extension point for any plugin, first-party or not: typed, redacted views of Ardia's state that arrive after
+each change, and typed requests for tab and group changes that Ardia's own reducers carry out. Both are listed in
+`permissions.state` and shown on the consent sheet ("Hears when your tabs change…", "Can group tabs, move tabs…").
+
+```tsx
+ardia.tabs.onChange(({ initial, tabs, removed }) => mirror.apply(initial, tabs, removed));
+ardia.navigation.onCommit(({ tabId, url }) => seen.add(url));
+ardia.workspace.onChange(({ windows, groups }) => draw(windows, groups));
+ardia.downloads.onChange(({ downloads }) => badge(downloads.filter((d) => d.state === "downloading").length));
+const { group } = await ardia.tabs.group([a, b], { name: "Reading", color: "blue" });
+await ardia.tabs.move([c], { before: a });
+await ardia.workspace.updateGroup(group!, { collapsed: true });
+```
+
+`ardia.state.subscribe(topic, listener)` and `ardia.state.intent(name, args)` are the general forms; on the channel
+they are `state.subscribe {topics}` and `state.intent {intent, args}`, so a sidecar uses them too.
+
+**Topics** (`state/plugins/stateEvents.ts`). The first event after subscribing has `initial: true` and the whole state;
+later ones carry only what changed.
+
+| Topic | Event | Needs |
+| --- | --- | --- |
+| `tabs` | `state.tabs {initial?, tabs, removed}`: each tab's `id`, `windowId`, `index`, `url`, `title`, `pinned`, `active`, `groupId`, `muted` | `tabs` |
+| `workspace` | `state.workspace {initial?, windows, groups, removedWindows, removedGroups}`: windows (`kind`, `focused`, `activeTabId`, `tabCount`) and groups (`name`, `color`, `icon`, `collapsed`, `pinned`, `parentId`, `tabIds`) | `tabs` |
+| `navigation` | `state.navigation {commits}`: each `{tabId, windowId, url, title}` for a tab now on a new address; nothing on subscribing | `tabs` |
+| `downloads` | `state.downloads {initial?, downloads, removed}`: `id`, `state`, `paused`, `dangerous`, `received`, `total`, `mimeType`, the file's name, and `url` only with `tabs` | nothing more |
+
+**Redaction** (`state/plugins/pluginEventRedaction.ts`), on every event, before it leaves Ardia:
+
+- Never a private window, a tab of an incognito profile, a Peek, a private download, or a group in any of them. Their
+  ids don't appear, not even in another window's counts or a group's `tabIds`.
+- An address is shown only when it is `http` or `https` with a host and no user name or password. Any other page
+  (`file:`, Ardia's and Chromium's own pages such as settings, history and passwords, `about:`, `data:`, another
+  plugin's page) has `url` and `title` `null`, and is never a navigation commit.
+- Without `fullUrls` an address loses what follows `?` and `#`; with it, it keeps its query but never its fragment, and
+  a query naming a token, key, password, session, code, signature or credential is cut too.
+- Titles and file names lose control and direction characters and are capped (500 and 255 characters). Downloads never
+  say where the file was saved.
+
+**Delivery never holds up Ardia.** A commit only marks a topic changed. 100 ms later, once, Ardia builds each topic's
+view, diffs it against what that plugin last got and sends the difference; fifty commits in between are one event.
+The work happens in a timer, never inside a commit, so tab switching and typing never wait on it, and a plugin that is
+slow, hung or gone can't slow them down: sends go to the helper's own buffered channel, a send that fails is dropped
+and the next event for that topic is a whole `initial` one again. A list over 200 rows arrives in parts (the first
+`initial`), and an event over 512 KB is dropped. Subscriptions end with the run.
+
+**Intents** (`state/plugins/stateIntents.ts`) are the only state a plugin may change this way, and each must be listed:
+
+| Intent | `args` | Does |
+| --- | --- | --- |
+| `tabs.group` | `{tabs, name?, color?, icon?, collapsed?}` | groups the tabs; answers `{ok, group}` |
+| `tabs.ungroup` | `{group}` | ungroups it |
+| `tabs.move` | `{tabs, before? \| after?, group? (id or null), window?}` | moves the tabs; it needs a destination |
+| `tabs.pin` | `{tabs, as? ("tile" or "row")}` | |
+| `tabs.unpin` | `{tabs}` | |
+| `tabs.mute`, `tabs.unmute` | `{tabs}` | |
+| `tabs.activate` | `{tab}` | |
+| `groups.update` | `{group, name?, color?, icon?, collapsed?}` | at least one change |
+
+- Every field is checked at the boundary before anything runs: own keys only, an unknown key is `bad_request`, `tabs` is
+  1 to 100 distinct ids, and every id must be a tab, group or normal window the plugin could see (never private) or the
+  request is `refused`. Names are at most 200 characters with no control or direction characters; colours and icons
+  are the ones Ardia's picker has.
+- No profile, URL, group name lookup or `$N` reference is accepted, and no intent writes anything else: not
+  `plugins.json`, consent or approvals, the Keychain or secrets, permissions, update pins, settings or profiles. An
+  intent name Ardia doesn't list is `bad_request`; a listed one the manifest doesn't is `refused`.
+- Ardia runs it through the same operations as `apply` (`workspaceOps.ts`), one at a time, and checks again before each
+  that the run is current and still holds the intent. The answer is `{ok: true}` (with `group` for `tabs.group`) or an
+  error; it carries no tabs or addresses.
 
 ### tools
 
@@ -949,6 +1024,8 @@ Requests from the helper (`{"id", "method", "params"}`):
 | `run` `{"command", "arg"?, "window"?, "tab"?}` | `commands` | as on the socket |
 | `open` `{"urls", "activate"?}` | `commands` | opens 1 to 10 `http:` or `https:` URLs as background tabs in the last focused window (`activate` selects the first there without raising the window). Each URL, at most 2048 characters, is parsed whole as http or https with a host, before anything opens: the host as written must be ASCII (a Unicode name is refused; send it in punycode, `xn--`), with no user name or password and a port from 1 to 65535; an IPv6 host is put in its short form, and dotted IPv4 must have four parts. Raw spaces (percent-encode them), backslashes and control characters are refused before parsing. What opens is the normalised address: scheme and host lower-cased, the default port dropped, non-ASCII in the path, query and fragment percent-encoded as UTF-8, everything else as given. Anything else (`file:`, a path, `ardia:` or `chrome:` pages, `about:`, `javascript:`, `data:`, `ardia-plugin:`) is `bad_request`, and the message names the first bad entry, as in `urls[1] isn't a valid address`. It runs only while the run that asked is still the plugin's current run and still has `commands`; one queued behind other work when that stops opens nothing. Answers `{"ok": true, "tabs": [ids]}`: the tabs it made, nothing else |
 | `apply` `{"ops"}` | `workspace`, or `tabs: write` for `open`, `tab.close` and `tab.activate` | as on the socket, except that every URL in `open` and `group.create` is read by `open`'s rules above (http or https only). A batch with any other address is `refused` whole before anything in it runs, and the message names the address |
+| `state.subscribe` `{"topics"}` | each topic in `permissions.state.events` | `{"ok": true, "topics"}`, replacing the run's topics (`[]` ends them); then `{"event": "state.<topic>", "time", "data"}` lines ([State events and intents](#state-events-and-intents)). A topic it doesn't list refuses the whole request |
+| `state.intent` `{"intent", "args"}` | the intent in `permissions.state.intents` | `{"ok": true, "group"?}`, once Ardia's own reducers made the change |
 | `page.post` `{"message", "view"?}` | a `page` | `{"ok": true}`, or `overloaded`: a message to the plugin's page views ([Pages and their helper](#pages-and-their-helper)); `refused` for a plugin with no page, however the method name is spelled in JSON |
 | `page.open` `{"path"?, "split"?, "side"?, "context"?}` | a `page`; `context` needs `tabs` | `{"tabId", "windowId"}`: opens the plugin's page at that path in the last focused window, as a tab or in Split View beside the current tab |
 | `tools.call` `{"plugin", "tool", "input"?}` | every permission the other plugin has | the tool's result, or its error; the plugin must be on and running. A plugin can't reach through another plugin's tools to what it wasn't granted itself |
@@ -1150,7 +1227,9 @@ in the local copy. Hourly `usage_counts`:
   plugin URL rules, such as one that isn't http or https or has a user name and password, by the operation that held it),
   `plugin_storage_writes`, `plugin_storage_cancels` (a storage request dropped because the plugin was being removed),
   `plugin_secret_writes`, `plugin_page_reads` (`activePage` reads), `plugin_decide_calls`,
-  `plugin_decide_timeouts`.
+  `plugin_decide_timeouts`, `plugin_state_events` (state events sent), `plugin_state_events_dropped` (too big, or the
+  send failed), `plugin_state_flushes_slow` (building them took over 16 ms), `plugin_state_subscribe_refusals`,
+  `plugin_state_intents` (intents applied) and `plugin_state_intent_refusals`.
 
 The daily settings snapshot has `plugins_installed`, `plugins_enabled` and, among those on, how many use each part:
 `plugins_with_settings`, `plugins_with_commands`, `plugins_with_page`, `plugins_with_process`,
@@ -1178,6 +1257,8 @@ and each refusal's reason
 
 Dashboard: watch `plugin_process_crashes` against `plugin_process_starts`, `plugin_activation_failures` against
 `plugin_activations`, `plugin_decide_timeouts` against `plugin_decide_calls` (a plugin slowing navigation),
-`plugin_net_refusals` against `plugin_net_fetches`, `plugin_url_refusals_open` and `plugin_url_refusals_group_create`
+`plugin_state_flushes_slow` and `plugin_state_events_dropped` against `plugin_state_events` (state events costing
+the UI thread), `plugin_state_intent_refusals` against `plugin_state_intents`, `plugin_net_refusals` against
+`plugin_net_fetches`, `plugin_url_refusals_open` and `plugin_url_refusals_group_create`
 (a plugin trying addresses it may not open), `program_link_failures` against `program_links`, and `program_after_update_quit_kills` against
 `program_after_update_quit_exits` (afterUpdate commands that ignore TERM at quit).

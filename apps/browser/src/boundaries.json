@@ -1082,6 +1082,25 @@
    ]
   },
   {
+   "id": "plugin-method:state.intent",
+   "source": "plugin",
+   "guard": "parseIntent: an allowlist of tab and group intents, each in permissions.state.intents; own-key fields only, ids of eligible tabs, groups and normal windows only, no profiles, URLs or names; applied through applyMethod with the grant re-checked per op",
+   "checks": [
+    "apps/browser/src/state/plugins/channelApi.ts#case \"state.intent\"",
+    "apps/browser/src/state/plugins/stateIntents.ts#parseIntent"
+   ]
+  },
+  {
+   "id": "plugin-method:state.subscribe",
+   "source": "plugin",
+   "guard": "Topics in permissions.state.events only, refused whole otherwise; every event is projected through pluginEventRedaction after the commit, coalesced, with no private window, incognito tab, private download, file, internal or credentialed address",
+   "checks": [
+    "apps/browser/src/state/plugins/channelApi.ts#case \"state.subscribe\"",
+    "apps/browser/src/state/plugins/stateEvents.ts#subscribeState",
+    "apps/browser/src/state/plugins/pluginEventRedaction.ts#pluginStateUrl"
+   ]
+  },
+  {
    "id": "plugin-method:tabs.readActivePage",
    "source": "plugin",
    "guard": "Plugin gesture and permission, re-checked after the read; page text is data",

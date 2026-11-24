@@ -22,6 +22,7 @@ export type {
   PageMessageListener,
   PluginDefinition,
   SettingsListener,
+  StateListener,
   ToolHandler,
   ViewComponent,
   ViewProps,

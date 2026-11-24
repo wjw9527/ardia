@@ -33,6 +33,8 @@
     fetch: "net.fetch",
     programsStatus: "programs.status",
     programsRelink: "programs.relink",
+    stateSubscribe: "state.subscribe",
+    stateIntent: "state.intent",
     surfaceRender: "surface.render",
     surfaceClose: "surface.close"
   };
@@ -127,6 +129,7 @@
       omnibox: new Set(),
       decide: new Map(),
       events: new Map(),
+      state: new Map(),
       pages: new Set(),
       settings: new Set()
     };
@@ -217,6 +220,23 @@
         };
       }
     };
+    const stateApi = {
+      subscribe(topic, listener) {
+        let listeners = registry.state.get(topic);
+        if (!listeners) registry.state.set(topic, listeners = new Set());
+        const added = addTo(listeners, listener);
+        state.subscriptionsChanged();
+        return {
+          dispose() {
+            added.dispose();
+            if (listeners.size === 0 && registry.state.get(topic) === listeners) registry.state.delete(topic);
+            state.subscriptionsChanged();
+          }
+        };
+      },
+      intent: (intent2, args) => rpc.request(HOST_METHODS.stateIntent, { intent: intent2, args })
+    };
+    const intent = stateApi.intent;
     const apply = (ops) => rpc.request(HOST_METHODS.workspaceApply, { ops });
     const windows = async () => {
       const listed = await rpc.request(HOST_METHODS.windows);
@@ -257,12 +277,31 @@
         activePage: async () => await rpc.request(HOST_METHODS.activePage) ?? null,
         open: (urls, options = {}) => rpc.request(HOST_METHODS.open, { urls: typeof urls === "string" ? [urls] : urls, ...options }),
         close: (tabId) => apply([{ op: "tab.close", tabs: [tabId] }]),
-        activate: (tabId) => apply([{ op: "tab.activate", tab: tabId }])
+        activate: (tabId) => apply([{ op: "tab.activate", tab: tabId }]),
+        onChange: (listener) => stateApi.subscribe("tabs", listener),
+        group: (tabIds, look = {}) => intent("tabs.group", { ...look, tabs: [...tabIds] }),
+        ungroup: (groupId) => intent("tabs.ungroup", { group: groupId }),
+        move: (tabIds, to) => intent("tabs.move", { ...to, tabs: [...tabIds] }),
+        pin: (tabIds, options = {}) => intent("tabs.pin", { ...options, tabs: [...tabIds] }),
+        unpin: (tabIds) => intent("tabs.unpin", { tabs: [...tabIds] }),
+        mute: (tabIds) => intent("tabs.mute", { tabs: [...tabIds] }),
+        unmute: (tabIds) => intent("tabs.unmute", { tabs: [...tabIds] })
       },
       workspace: {
         snapshot: (options = {}) => rpc.request(HOST_METHODS.workspace, { ...options }),
-        apply
+        apply,
+        onChange: (listener) => stateApi.subscribe("workspace", listener),
+        updateGroup: (groupId, look) => intent("groups.update", { ...look, group: groupId })
       },
+      navigation: {
+        onCommit: (listener) => stateApi.subscribe("navigation", (change, event) => {
+          for (const commit of change.commits ?? []) listener(commit, event);
+        })
+      },
+      downloads: {
+        onChange: (listener) => stateApi.subscribe("downloads", listener)
+      },
+      state: stateApi,
       ui: {
         quickPick: quickPick(rpc),
         async inputBox(options) {
@@ -878,6 +917,60 @@
     };
   }
 
+  var STATE_PREFIX = "state.";
+  function createSubscriptionSync(rpc, registry, report, live) {
+    let acknowledgedEvents = "";
+    let acknowledgedTopics = "";
+    let queued = false;
+    let inFlight = false;
+    const wantedEvents = () => [...registry.events.keys()].filter((name) => name !== "plugin.values").sort();
+    const wantedTopics = () => [...registry.state.keys()].sort();
+    const sync = () => {
+      if (!live() || queued || inFlight) return;
+      queued = true;
+      enqueueMicrotask(() => {
+        queued = false;
+        void send();
+      });
+    };
+    async function send() {
+      if (!live() || inFlight) return;
+      const events = wantedEvents();
+      const signature = events.join(",");
+      const topics = wantedTopics();
+      const topicSignature = topics.join(",");
+      if (signature === acknowledgedEvents && topicSignature === acknowledgedTopics) return;
+      inFlight = true;
+      let failed = false;
+      try {
+        if (signature !== acknowledgedEvents) {
+          await rpc.request(HOST_METHODS.subscribe, { events });
+          acknowledgedEvents = signature;
+        }
+        if (topicSignature !== acknowledgedTopics) {
+          await rpc.request(HOST_METHODS.stateSubscribe, { topics });
+          acknowledgedTopics = topicSignature;
+        }
+      } catch (error) {
+        failed = true;
+        report(error);
+      } finally {
+        inFlight = false;
+      }
+      if (!failed || wantedEvents().join(",") !== signature || wantedTopics().join(",") !== topicSignature) sync();
+    }
+    function deliverState(name, data, time) {
+      for (const listener of [...registry.state.get(name.slice(STATE_PREFIX.length)) ?? []]) {
+        try {
+          listener(data, { name, time });
+        } catch (error) {
+          report(error);
+        }
+      }
+    }
+    return { sync, deliverState };
+  }
+
   var SDK_VERSION = "2.0.0";
   var DEFAULT_STOP_GRACE_MS = 5e3;
   function createSignal() {
@@ -938,9 +1031,6 @@
     let activated = false;
     let stopped = false;
     let stopping = null;
-    let acknowledgedEvents = "";
-    let subscribeQueued = false;
-    let subscribeInFlight = false;
     let work = Promise.resolve();
     let cleanup = async () => surfaces.closeAll();
     const stop = () => {
@@ -971,37 +1061,11 @@
         cancelTimer(timer);
       }
     };
-    const wantedEvents = () => [...registry.events.keys()].filter((name) => name !== "plugin.values").sort();
-    const syncSubscriptions = () => {
-      if (!activated || stopped || subscribeQueued || subscribeInFlight) return;
-      subscribeQueued = true;
-      enqueueMicrotask(() => {
-        subscribeQueued = false;
-        void sendSubscriptions();
-      });
-    };
-    async function sendSubscriptions() {
-      if (stopped || subscribeInFlight) return;
-      const events = wantedEvents();
-      const signature = events.join(",");
-      if (signature === acknowledgedEvents) return;
-      subscribeInFlight = true;
-      let failed = false;
-      try {
-        await rpc.request(HOST_METHODS.subscribe, { events });
-        acknowledgedEvents = signature;
-      } catch (error) {
-        failed = true;
-        report(error);
-      } finally {
-        subscribeInFlight = false;
-      }
-      if (!failed || wantedEvents().join(",") !== signature) syncSubscriptions();
-    }
+    const subscriptions = createSubscriptionSync(rpc, registry, report, () => activated && !stopped);
     const state = {
       values: {},
       info: { name: "", app: "", version: "", protocol: 0 },
-      subscriptionsChanged: syncSubscriptions
+      subscriptionsChanged: () => subscriptions.sync()
     };
     const ardia2 = createArdia(rpc, registry, state);
     const surfaces = createSurfaceHost(rpc, registry, report);
@@ -1076,6 +1140,7 @@
       await sendResult({ call: message.call, error: `The plugin didn't activate: ${errorMessage(activationError)}` });
     }
     function deliverEvent(name, data, time) {
+      if (name.startsWith(STATE_PREFIX)) return subscriptions.deliverState(name, data, time);
       if (name === "plugin.values") {
         const values = data.values ?? data;
         state.values = { ...state.values, ...values };
@@ -1179,7 +1244,7 @@
         }
         if (stopped) return;
         activated = true;
-        syncSubscriptions();
+        subscriptions.sync();
       })();
       const ready = activation.then(() => stopped ? void 0 : rpc.request(HOST_METHODS.ready, readyParams())).then(() => void 0);
       ready.catch(report);

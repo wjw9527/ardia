@@ -812,6 +812,53 @@ describe("createHostRuntime", () => {
     assert.deepEqual(seen, [["tab.closed", "t3"]]);
   });
 
+  test("state topics subscribe through state.subscribe, apart from hooks, and reach only their own listeners", async () => {
+    const seen = [];
+    const { host, runtime, errors } = await started({});
+    runtime.ardia.hooks.on("*", (_data, event) => seen.push(["any", event.name]));
+    const offTabs = runtime.ardia.tabs.onChange((change) => seen.push(["tabs", change.tabs.map((t) => t.id)]));
+    runtime.ardia.navigation.onCommit((commit) => seen.push(["nav", commit.tabId, commit.url]));
+    runtime.ardia.workspace.onChange(() => {
+      throw new Error("a broken listener");
+    });
+    runtime.ardia.downloads.onChange((change) => seen.push(["downloads", change.downloads.length]));
+    await settle();
+    assert.deepEqual(host.calls("state.subscribe").at(-1).params, { topics: ["downloads", "navigation", "tabs", "workspace"] });
+    assert.deepEqual(host.calls("subscribe").at(-1).params, { events: ["*"] });
+    host.push({ event: "state.tabs", time: 2, data: { initial: true, tabs: [{ id: "t1" }], removed: [] } });
+    host.push({ event: "state.workspace", data: { windows: [], groups: [], removedWindows: [], removedGroups: [] } });
+    host.push({ event: "state.navigation", data: { commits: [{ tabId: "t1", windowId: "w1", url: "https://a.example/", title: "A" }, { tabId: "t2", windowId: "w1", url: "https://b.example/", title: null }] } });
+    host.push({ event: "state.downloads", data: { downloads: [{ id: "d1" }], removed: [] } });
+    await settle();
+    assert.deepEqual(seen, [["tabs", ["t1"]], ["nav", "t1", "https://a.example/"], ["nav", "t2", "https://b.example/"], ["downloads", 1]]);
+    assert.equal(errors.length, 1, "a throwing listener is reported, and the rest still run");
+    offTabs.dispose();
+    await settle();
+    assert.deepEqual(host.calls("state.subscribe").at(-1).params, { topics: ["downloads", "navigation", "workspace"] });
+  });
+
+  test("tab and group intents are typed state.intent requests, never raw apply ops", async () => {
+    const { host, runtime } = await started({}, { "state.intent": () => ({ ok: true, group: "g1" }) });
+    assert.deepEqual(await runtime.ardia.tabs.group(["t1", "t2"], { name: "Read", color: "blue" }), { ok: true, group: "g1" });
+    await runtime.ardia.tabs.move(["t1"], { before: "t3" });
+    await runtime.ardia.tabs.pin(["t1"], { as: "row" });
+    await runtime.ardia.tabs.ungroup("g1");
+    await runtime.ardia.workspace.updateGroup("g1", { collapsed: true });
+    await runtime.ardia.state.intent("tabs.mute", { tabs: ["t2"] });
+    assert.deepEqual(
+      host.calls("state.intent").map((m) => m.params),
+      [
+        { intent: "tabs.group", args: { name: "Read", color: "blue", tabs: ["t1", "t2"] } },
+        { intent: "tabs.move", args: { before: "t3", tabs: ["t1"] } },
+        { intent: "tabs.pin", args: { as: "row", tabs: ["t1"] } },
+        { intent: "tabs.ungroup", args: { group: "g1" } },
+        { intent: "groups.update", args: { collapsed: true, group: "g1" } },
+        { intent: "tabs.mute", args: { tabs: ["t2"] } },
+      ],
+    );
+    assert.equal(host.calls("apply").length, 0);
+  });
+
   test("a call cancelled before activation finishes never runs and sends no result", async () => {
     let releaseHello;
     const host = fakeHost({ hello });

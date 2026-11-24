@@ -25,6 +25,8 @@ const { filterListAddress } = await import("./state/site/contentBlocking.ts");
 const { CLEAN_UP_KEY, LEGACY_CLEAN_UP_KEY } = await import("./state/settings/cleanUpAfter.ts");
 const { updateWithin } = await import("./state/plugins/officialUpdate.ts");
 const { readManifest } = await import("./lib/pluginManifest.ts");
+const { parseIntent, INTENT_SPECS } = await import("./state/plugins/stateIntents.ts");
+const { pluginStateUrl, redactedTabs } = await import("./state/plugins/pluginEventRedaction.ts");
 const { copyLinkFromPageMenu } = await import("./state/site/pageLinkCopy.ts");
 const { cleanUrl } = await import("@ardia/core");
 
@@ -204,6 +206,56 @@ test("the owner's URL rule never opens script, data or engine-internal addresses
       if (typeof opened !== "string" || opened === "") continue;
       assert.doesNotMatch(opened, /^\s*(?:javascript|vbscript|data|chrome-extension|devtools|blob|filesystem):/i, show(url));
     }
+});
+
+test("a plugin's state event never carries a hostile address, whatever its tab holds", () => {
+  for (const r of [{ full: false, urls: true }, { full: true, urls: true }, { full: true, urls: false }]) {
+    for (const { value } of HOSTILE_VALUES) {
+      for (const url of typeof value === "string" ? [value, `https://a.test/${value}`, `${value}https://a.test/`, `https://a.test/?q=${value}#${value}`] : [value]) {
+        const shown = pluginStateUrl(url, r);
+        if (shown === null) continue;
+        assert.ok(r.urls, show(url));
+        assert.match(shown, /^https?:\/\/[^/?#\s@]+(?:[/?]|$)/i, show(url));
+        assert.doesNotMatch(shown, /[\u0000-\u001f\u007f-\u009f\u2028\u2029#]/u, show(url));
+        if (!r.full) assert.doesNotMatch(shown, /\?/, show(url));
+      }
+    }
+  }
+  S().hydrate({});
+  const w = S().createWindow({ url: "https://a.test/" });
+  for (const s of strings) S().newTab(w, { url: s });
+  for (const t of redactedTabs(S(), { full: true, urls: true })) {
+    if (t.url !== null) assert.match(t.url, /^https?:\/\//i, show(t.url));
+    if (t.title !== null) assert.doesNotMatch(t.title, /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u, show(t.title));
+  }
+});
+
+test("a hostile value in any intent field is refused before it reaches a reducer", () => {
+  S().hydrate({});
+  const w = S().createWindow({ url: "https://a.test/" });
+  const tab = activeTabId(S(), w);
+  for (const [intent, spec] of Object.entries(INTENT_SPECS)) {
+    for (const field of Object.keys(spec.fields)) {
+      for (const { value } of HOSTILE_VALUES) {
+        const args = { tabs: [tab], tab, group: "g-none", [field]: value };
+        for (const key of Object.keys(args)) if (!Object.hasOwn(spec.fields, key)) delete args[key];
+        const parsed = parseIntent(intent, args);
+        if (!("op" in parsed)) {
+          assert.ok(parsed.code === "bad_request" || parsed.code === "refused", show(value));
+          continue;
+        }
+        for (const [key, out] of Object.entries(parsed.op)) {
+          if (typeof out === "string") assert.doesNotMatch(out, /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e]/u, `${intent}.${key} ${show(value)}`);
+          if (key === "tabs") for (const id of out) assert.equal(id, tab, show(value));
+        }
+        assert.ok(!("profile" in parsed.op) && !("urls" in parsed.op), show(value));
+      }
+    }
+  }
+  for (const key of PROTOTYPE_KEYS) {
+    assert.equal(parseIntent(key, { tabs: [tab] }).code, "bad_request", key);
+    assert.equal(parseIntent("tabs.pin", JSON.parse(`{"tabs":[${JSON.stringify(tab)}],${JSON.stringify(key)}:1}`)).code, "bad_request", key);
+  }
 });
 
 test("an operation named after an Object prototype key is a bad request, not a crash", () => {

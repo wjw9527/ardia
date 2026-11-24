@@ -12,6 +12,7 @@ import {
 } from "./protocol";
 import { PluginError, createRpc, errorMessage, isUnencodable, type Transport } from "./rpc";
 import { createSurfaceHost } from "./surfaces";
+import { createSubscriptionSync, STATE_PREFIX } from "./subscriptions";
 import { createRegistry, disposable, type CallContext, type CancelSignal, type Disposable, type PluginDefinition, type Registry } from "./types";
 
 export const SDK_VERSION = "2.0.0";
@@ -99,9 +100,6 @@ export function createHostRuntime(transport: Transport, options: HostRuntimeOpti
   let activated = false;
   let stopped = false;
   let stopping: Promise<void> | null = null;
-  let acknowledgedEvents = "";
-  let subscribeQueued = false;
-  let subscribeInFlight = false;
   let work = Promise.resolve();
   let cleanup: () => Promise<void> = async () => surfaces.closeAll();
 
@@ -135,40 +133,12 @@ export function createHostRuntime(transport: Transport, options: HostRuntimeOpti
     }
   };
 
-  const wantedEvents = () => [...registry.events.keys()].filter((name) => name !== "plugin.values").sort();
-
-  const syncSubscriptions = () => {
-    if (!activated || stopped || subscribeQueued || subscribeInFlight) return;
-    subscribeQueued = true;
-    enqueueMicrotask(() => {
-      subscribeQueued = false;
-      void sendSubscriptions();
-    });
-  };
-
-  async function sendSubscriptions() {
-    if (stopped || subscribeInFlight) return;
-    const events = wantedEvents();
-    const signature = events.join(",");
-    if (signature === acknowledgedEvents) return;
-    subscribeInFlight = true;
-    let failed = false;
-    try {
-      await rpc.request(M.subscribe, { events });
-      acknowledgedEvents = signature;
-    } catch (error) {
-      failed = true;
-      report(error);
-    } finally {
-      subscribeInFlight = false;
-    }
-    if (!failed || wantedEvents().join(",") !== signature) syncSubscriptions();
-  }
+  const subscriptions = createSubscriptionSync(rpc, registry, report, () => activated && !stopped);
 
   const state: ApiState = {
     values: {},
     info: { name: "", app: "", version: "", protocol: 0 },
-    subscriptionsChanged: syncSubscriptions,
+    subscriptionsChanged: () => subscriptions.sync(),
   };
   const ardia = createArdia(rpc, registry, state);
   const surfaces = createSurfaceHost(rpc, registry, report);
@@ -253,6 +223,7 @@ export function createHostRuntime(transport: Transport, options: HostRuntimeOpti
   }
 
   function deliverEvent(name: string, data: Record<string, unknown>, time: number | undefined) {
+    if (name.startsWith(STATE_PREFIX)) return subscriptions.deliverState(name, data, time);
     if (name === "plugin.values") {
       const values = (data.values ?? data) as Record<string, unknown>;
       state.values = { ...state.values, ...values };
@@ -361,7 +332,7 @@ export function createHostRuntime(transport: Transport, options: HostRuntimeOpti
       }
       if (stopped) return;
       activated = true;
-      syncSubscriptions();
+      subscriptions.sync();
     })();
     const ready = activation.then(() => (stopped ? undefined : rpc.request(M.ready, readyParams()))).then(() => undefined);
     ready.catch(report);
