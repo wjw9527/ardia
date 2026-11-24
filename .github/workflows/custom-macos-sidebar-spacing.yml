@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: c8a0ae95a30dc785748bcb26fbf634eb2cd13222
+          ref: 75807049da4cf580c6a271c297a67b9036b2af3b
           persist-credentials: false
       - name: Verify runner
         run: |
