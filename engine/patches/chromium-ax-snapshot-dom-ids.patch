@@ -1,0 +1,14 @@
+diff --git a/ui/accessibility/ax_tree_combiner.cc b/ui/accessibility/ax_tree_combiner.cc
+--- a/ui/accessibility/ax_tree_combiner.cc
++++ b/ui/accessibility/ax_tree_combiner.cc
+@@ -110,6 +110,10 @@
+         node.GetStringAttribute(ax::mojom::StringAttribute::kChildTreeId));
+ 
+     // Map the node's ID.
++    if (node.id > 0) {
++      node.AddIntAttribute(ax::mojom::IntAttribute::kDOMNodeIdDeprecated,
++                           node.id);
++    }
+     node.id = MapId(tree_id, node.id);
+ 
+     // Map the node's child IDs.

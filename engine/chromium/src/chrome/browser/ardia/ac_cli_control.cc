@@ -33,6 +33,8 @@
 #include "ardia/core/ac_windowless_page.h"
 #include "chrome/browser/ardia/ac_cli_console_ring.h"
 #include "chrome/browser/ardia/ac_cli_control_file.h"
+#include "chrome/browser/ardia/ac_cli_devtools_sessions.h"
+#include "chrome/browser/ardia/ac_cli_ops.h"
 #include "chrome/browser/ardia/ac_cli_owned_tabs.h"
 #include "chrome/browser/ardia/ac_cli_page_signals.h"
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
@@ -179,6 +181,7 @@ class ControlServer {
     status.Set("tokenCommands", TokenCommandTotals());
     status.Set("pageSignals", PageSignalTotals());
     status.Set("consoleRing", ConsoleRingTotals());
+    status.Set("engineCli", EngineCliTotals());
     if (ardiacore::TestFlag("nativeDragRefused")) {
       status.Set("nativeDragsRefused", true);
     }
@@ -460,6 +463,7 @@ AC_ARGS_CALL(ac_cli_control) {
   }
   if (on.has_value()) {
     server.Disable();
+    ardia::CloseAllCliDevToolsSessions();
   }
   out.Send(server.Status());
 }

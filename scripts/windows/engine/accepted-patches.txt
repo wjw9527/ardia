@@ -18,6 +18,7 @@ chromium-devtools-window-title.patch
 chromium-global-trace-id-64bit.patch
 chromium-drag-start-event-id.patch
 chromium-devtools-control-token.patch
+chromium-ax-snapshot-dom-ids.patch
 chromium-drag-always-ends.patch
 chromium-capture-wake-lock-awake-only.patch
 chromium-device-emulation-size-reset.patch
