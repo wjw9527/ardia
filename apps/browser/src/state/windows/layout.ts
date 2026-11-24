@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { autoHidesTabsIn, sidebarSideOf, tabLayoutOf, tabsShownIn } from "../browser/model";
 import { switchOn } from "../../platform/killSwitches";
-import { ARC_LIGHTS_CENTER, lightsCenter, sidebarLightsCenter, toolbarLightsCenter, TOP_STRIP_LIGHTS_CENTER, useDockMotion } from "./dockMotion";
+import { ARC_LIGHTS_CENTER, lightsCenter, sidebarLightsCenter, toolbarLightsCenter, TOP_STRIP_LIGHTS_CENTER } from "./dockMotion";
 import { frameCornerRadius, windowFrame, type LightsPlace } from "../../platform/windows";
 import { rootSizeOfFrame } from "../settings/interfaceScale";
 import { DEFAULT_SIDEBAR_WIDTH, pageFrameInsetOf } from "../../lib/windowLayout";
@@ -72,20 +72,35 @@ export function openingLightsCenter(s: BrowserState, windowId: string): LightsPl
   return sidebarLightsCenter(sidebarSideOf(s, w.id) === "right", width, open ? 0 : width, 0, base);
 }
 
-export function usePageFrameInset(forSidebarPeek = false): number {
+export function usePageFrameInset(): number {
   const windowId = useWindowId();
-  const sidebarPeek = useDockMotion((m) => !!m.peeks[windowId]);
-  return useWindowSettings(windowId, (s) => pageFrameIn(s, windowId, sidebarPeek || forSidebarPeek));
+  return useWindowSettings(windowId, (s) =>
+    pageFrameInsetOf(s.settings.pageFrame, {
+      borderlessMode: s.settings.borderlessMode || minimalismIn(s, windowId),
+      zeroInFullScreen: s.settings.pageFrameZeroInFullScreen,
+      fullScreen: !!s.windows[windowId]?.fullScreen,
+      zeroWhenTabsHidden: s.settings.pageFrameZeroWhenTabsHidden && tabLayoutOf(s, windowId) === "sidebar",
+      tabsHidden: autoHidesTabsIn(s, windowId),
+    }),
+  );
 }
 
-export const pageFrameIn = (s: BrowserState, windowId: string, sidebarPeek = false): number =>
+export const pageFrameIn = (s: BrowserState, windowId: string): number =>
   pageFrameInsetOf(s.settings.pageFrame, {
     borderlessMode: s.settings.borderlessMode || minimalismIn(s, windowId),
     zeroInFullScreen: s.settings.pageFrameZeroInFullScreen,
     fullScreen: !!s.windows[windowId]?.fullScreen,
     zeroWhenTabsHidden: s.settings.pageFrameZeroWhenTabsHidden && tabLayoutOf(s, windowId) === "sidebar",
-    tabsHidden: autoHidesTabsIn(s, windowId) && !sidebarPeek,
+    tabsHidden: autoHidesTabsIn(s, windowId),
   });
+
+export const roundsZeroSidebarFrameIn = (s: BrowserState, windowId: string): boolean =>
+  !!s.windows[windowId]?.fullScreen && s.windows[windowId]?.kind !== "small" && tabLayoutOf(s, windowId) === "sidebar" && autoHidesTabsIn(s, windowId);
+
+export function useRoundsZeroSidebarFrame(): boolean {
+  const windowId = useWindowId();
+  return useWindowSettings(windowId, (s) => roundsZeroSidebarFrameIn(s, windowId));
+}
 
 const toolbarless = (s: BrowserState, windowId: string): boolean => addressBarInSidebar(s, windowId) || minimalismIn(s, windowId);
 

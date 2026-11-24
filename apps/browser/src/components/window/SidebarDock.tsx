@@ -253,7 +253,7 @@ function SidebarDock({
   const latestReveal = useRef({ state, right, windowWidth, band, reveal });
   latestReveal.current = { state, right, windowWidth, band, reveal };
   const frame = useCardFrame();
-  const peekAt = useCardFrame(true).peek;
+  const peekAt = frame.peek;
   const holdWidth = peekHoldWidth(width, peekAt.left);
   const peeking = peekOnScreen(state);
   const holding = state === "peeking";
