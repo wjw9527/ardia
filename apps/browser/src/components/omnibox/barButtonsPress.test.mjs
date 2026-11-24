@@ -29,7 +29,7 @@ test("the bar's Go button is a plain View that answers the press with its presse
   assert.ok(flat(pressed.props.style).opacity < flat(rest.props.style).opacity, "pressed reads darker than rest");
 });
 
-test("the bar's Open a tab or file chip is a plain View that answers the press with its pressed fill, no scale", () => {
+test("the bar's Open a tab or file chip is borderless and answers the press with its pressed fill, no scale", () => {
   const face = faceOf(AddChip, { onPress() {} });
   const rest = face(false);
   const pressed = face(true);
@@ -37,4 +37,9 @@ test("the bar's Open a tab or file chip is a plain View that answers the press w
   assert.equal(pressed.type, View);
   assert.equal(flat(pressed.props.style).transform, undefined);
   assert.notEqual(flat(pressed.props.style).backgroundColor, flat(rest.props.style).backgroundColor);
+  for (const state of [rest, pressed]) {
+    const style = flat(state.props.style);
+    assert.equal(style.borderWidth ?? 0, 0);
+    assert.equal(style.borderColor, undefined);
+  }
 });

@@ -39,7 +39,6 @@ export const BAR = {
 export const ADD_CHIP = {
   height: 32,
   radius: capsule(32),
-  border: 1,
   left: 9,
   right: 12,
   gap: 5,

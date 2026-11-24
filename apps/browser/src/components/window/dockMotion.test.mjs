@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mount } from "../../test-hooks.mjs";
 
 globalThis.__DEV__ = false;
 const dm = { ...(await import("./dockMotion.ts")), ...(await import("./tokens.ts")), ...(await import("../../state/windows/dockMotion.ts")), ...(await import("./cardFrame.ts")) };
@@ -8,6 +9,8 @@ const DEFAULT_PEEK = dm.cardFrameOf(PAGE_FRAME.default).peek;
 const { toolbarGeometry } = await import("./geometry.ts");
 const { useBrowser } = await import("../../state/browser/store.ts");
 const stub = await import("../../test-native/index.ts");
+const { Animated } = await import("react-native");
+const { usePeek } = await import("./usePeek.ts");
 
 const S = () => useBrowser.getState();
 
@@ -210,7 +213,7 @@ const ARC_HIDE = [
   [[0, 0], [0.017, 0.328], [0.034, 0.654], [0.05, 0.853], [0.075, 0.956], [0.092, 1]],
 ];
 
-test("Arc's peek slides in on its measured spring and leaves on its ease-in-out; its hide is a 100 ms ease-out", () => {
+test("Arc's reference peek spring and exit curves retain their measured shapes", () => {
   for (const motion of ARC_PEEK_IN) {
     const rms = fitT0(motion, (t) => springAt(t, dm.ARC_PEEK_SPRING));
     assert.ok(rms < 0.04, `peek in rms ${rms.toFixed(3)}`);
@@ -227,7 +230,22 @@ test("Arc's peek slides in on its measured spring and leaves on its ease-in-out;
   assert.equal(dm.easeInOutCubic(1), 1);
   const peak = Math.max(...Array.from({ length: 400 }, (_, i) => springAt(i / 1000, dm.ARC_PEEK_SPRING)));
   const arcPeak = Math.max(...ARC_PEEK_IN.flat().map(([, x]) => x));
-  assert.ok(Math.abs(peak - arcPeak) < 0.002, `the panel's overshoot ${peak}, Arc's ${arcPeak}`);
+  assert.ok(Math.abs(peak - arcPeak) < 0.002, `the reference spring overshoot ${peak}, Arc's ${arcPeak}`);
+});
+
+test("the sidebar peek keeps its measured spring but clamps overshoot on reveal", (t) => {
+  const spring = t.mock.method(Animated, "spring");
+  const peek = mount(() => usePeek(true, true));
+  try {
+    peek.value.show();
+    assert.equal(spring.mock.callCount(), 1);
+    const [, config] = spring.mock.calls[0].arguments;
+    assert.equal(config.toValue, 1);
+    assert.equal(config.overshootClamping, true);
+    assert.equal(config.useNativeDriver, true);
+  } finally {
+    peek.unmount();
+  }
 });
 
 test("the peek stays off the window edge even when the page frame is zero, its corner nested in the window's", () => {
