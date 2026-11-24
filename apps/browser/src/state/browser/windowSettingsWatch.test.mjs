@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { mount } from "../../test-hooks.mjs";
 
 globalThis.__DEV__ = false;
 const { useBrowser } = await import("./store.ts");
 const { tabsShownIn } = await import("./model.ts");
 const { watchSettings, watchTabRecord, watchWindowSettings } = await import("./keyedWatch.ts");
-const { addressBarInSidebar, minimalismIn, pageFrameIn, roundsZeroSidebarFrameIn } = await import("../windows/layout.ts");
+const { addressBarInSidebar, minimalismIn, pageFrameIn, usePageFrameInset } = await import("../windows/layout.ts");
+const { WindowContext } = await import("./hooks.ts");
+const { setPeekShown } = await import("../windows/dockMotion.ts");
 const { splitOf } = await import("../splits/splits.ts");
 await import("../../test-native/index.ts");
 
@@ -21,7 +24,7 @@ function session() {
   return { w, other, ids };
 }
 
-const layoutOf = (w) => `${tabsShownIn(S(), w)}:${addressBarInSidebar(S(), w)}:${minimalismIn(S(), w)}:${pageFrameIn(S(), w)}:${roundsZeroSidebarFrameIn(S(), w)}`;
+const layoutOf = (w) => `${tabsShownIn(S(), w)}:${addressBarInSidebar(S(), w)}:${minimalismIn(S(), w)}:${pageFrameIn(S(), w)}`;
 
 test("the default frame disappears only in fullscreen with the sidebar hidden", () => {
   const { w } = session();
@@ -30,11 +33,41 @@ test("the default frame disappears only in fullscreen with the sidebar hidden", 
     for (const fullScreen of [true, false]) {
       for (const autoHideTabs of [true, false]) {
         const state = { ...base, windows: { ...base.windows, [w]: { ...base.windows[w], tabLayout, fullScreen, autoHideTabs } } };
-        const rounded = tabLayout === "sidebar" && fullScreen && autoHideTabs;
-        assert.equal(pageFrameIn(state, w), rounded ? 0 : base.settings.pageFrame);
-        assert.equal(roundsZeroSidebarFrameIn(state, w), rounded);
+        assert.equal(pageFrameIn(state, w), tabLayout === "sidebar" && fullScreen && autoHideTabs ? 0 : base.settings.pageFrame);
+        assert.equal(pageFrameIn(state, w, true), base.settings.pageFrame);
       }
     }
+  }
+});
+
+test("the floating sidebar restores the saved page frame only while it is visible", () => {
+  const { w, other } = session();
+  S().updateSettings({ pageFrame: 9, pageFrameZeroWhenTabsHidden: true, autoHideTabs: true, tabLayout: "sidebar" });
+  S().setWindowFullScreen(w, true);
+  const page = mount(() => usePageFrameInset(), { contexts: [[WindowContext, w]] });
+  const peek = mount(() => usePageFrameInset(true), { contexts: [[WindowContext, w]] });
+  try {
+    assert.equal(page.value, 0);
+    assert.equal(peek.value, 9);
+    setPeekShown(other, true);
+    assert.equal(page.value, 0);
+    setPeekShown(w, true);
+    assert.equal(page.value, 9);
+    S().updateSettings({ pageFrame: 6 });
+    assert.equal(page.value, 6);
+    assert.equal(peek.value, 6);
+    setPeekShown(w, false);
+    assert.equal(page.value, 0);
+    assert.equal(peek.value, 6);
+    S().updateSettings({ pageFrameZeroInFullScreen: true });
+    setPeekShown(w, true);
+    assert.equal(page.value, 0);
+    assert.equal(peek.value, 0);
+  } finally {
+    setPeekShown(w, false);
+    setPeekShown(other, false);
+    page.unmount();
+    peek.unmount();
   }
 });
 
