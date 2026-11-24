@@ -837,6 +837,33 @@ describe("createHostRuntime", () => {
     assert.deepEqual(host.calls("state.subscribe").at(-1).params, { topics: ["downloads", "navigation", "workspace"] });
   });
 
+  test("an event marked dropped resubscribes every state topic with resync, once at a time", async () => {
+    const seen = [];
+    const { host, runtime } = await started({});
+    runtime.ardia.tabs.onChange((change) => seen.push(change.initial === true));
+    runtime.ardia.downloads.onChange(() => {});
+    await settle();
+    const before = host.calls("state.subscribe").length;
+    host.push({ event: "tab.activated", dropped: 3, data: {} });
+    host.push({ event: "state.tabs", dropped: 1, data: { tabs: [], removed: [] } });
+    await settle();
+    const resyncs = host.calls("state.subscribe").slice(before);
+    assert.deepEqual(resyncs.map((m) => m.params), [{ topics: ["downloads", "tabs"], resync: true }]);
+    host.push({ event: "state.tabs", data: { initial: true, tabs: [], removed: [] } });
+    host.push({ event: "state.tabs", dropped: 0, data: { tabs: [], removed: [] } });
+    await settle();
+    assert.equal(host.calls("state.subscribe").length, before + 1, "no resync without a drop");
+    assert.deepEqual(seen, [false, true, false]);
+  });
+
+  test("a drop with no state listeners asks for nothing", async () => {
+    const { host } = await started({ events: { "tab.activated": () => {} } });
+    await settle();
+    host.push({ event: "tab.activated", dropped: 5, data: {} });
+    await settle();
+    assert.equal(host.calls("state.subscribe").length, 0);
+  });
+
   test("tab and group intents are typed state.intent requests, never raw apply ops", async () => {
     const { host, runtime } = await started({}, { "state.intent": () => ({ ok: true, group: "g1" }) });
     assert.deepEqual(await runtime.ardia.tabs.group(["t1", "t2"], { name: "Read", color: "blue" }), { ok: true, group: "g1" });

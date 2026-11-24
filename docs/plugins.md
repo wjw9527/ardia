@@ -544,8 +544,8 @@ later ones carry only what changed.
 | Topic | Event | Needs |
 | --- | --- | --- |
 | `tabs` | `state.tabs {initial?, tabs, removed}`: each tab's `id`, `windowId`, `index`, `url`, `title`, `pinned`, `active`, `groupId`, `muted` | `tabs` |
-| `workspace` | `state.workspace {initial?, windows, groups, removedWindows, removedGroups}`: windows (`kind`, `focused`, `activeTabId`, `tabCount`) and groups (`name`, `color`, `icon`, `collapsed`, `pinned`, `parentId`, `tabIds`) | `tabs` |
-| `navigation` | `state.navigation {commits}`: each `{tabId, windowId, url, title}` for a tab now on a new address; nothing on subscribing | `tabs` |
+| `workspace` | `state.workspace {initial?, windows, groups, removedWindows, removedGroups}`: windows (`kind`, `focused`, `activeTabId`, `tabCount`) and groups (`name`, `color`, `icon`, `collapsed`, `pinned`, `parentId`, `tabIds`). `focused` is the last window you were in that isn't private, so focusing a private window changes nothing here | `tabs` |
+| `navigation` | `state.navigation {commits}`: each `{tabId, windowId, url, title, sameDocument}` for a page the engine committed (`stateCommits.ts`, fed by the same commit reports as `tab.navigated`). An address typed or written but not yet committed is never one; a reload of the same address is, and an in-page change (`#part`, `pushState`) has `sameDocument: true`. `title` is `null` until the tab's title belongs to that address. Several commits of one tab between deliveries keep only the last. Nothing on subscribing | `tabs` |
 | `downloads` | `state.downloads {initial?, downloads, removed}`: `id`, `state`, `paused`, `dangerous`, `received`, `total`, `mimeType`, the file's name, and `url` only with `tabs` | nothing more |
 
 **Redaction** (`state/plugins/pluginEventRedaction.ts`), on every event, before it leaves Ardia:
@@ -556,16 +556,22 @@ later ones carry only what changed.
   (`file:`, Ardia's and Chromium's own pages such as settings, history and passwords, `about:`, `data:`, another
   plugin's page) has `url` and `title` `null`, and is never a navigation commit.
 - Without `fullUrls` an address loses what follows `?` and `#`; with it, it keeps its query but never its fragment, and
-  a query naming a token, key, password, session, code, signature or credential is cut too.
+  the whole query is cut when a parameter's name, percent-decoded (up to four times, `+` as a space), names a token,
+  key, password, session, code, signature or credential, or when any name or value can't be decoded.
 - Titles and file names lose control and direction characters and are capped (500 and 255 characters). Downloads never
-  say where the file was saved.
+  say where the file was saved. Downloads don't record which tab started them, so one started from a Peek is listed
+  like any other download of its profile; a private one never is.
 
 **Delivery never holds up Ardia.** A commit only marks a topic changed. 100 ms later, once, Ardia builds each topic's
 view, diffs it against what that plugin last got and sends the difference; fifty commits in between are one event.
 The work happens in a timer, never inside a commit, so tab switching and typing never wait on it, and a plugin that is
-slow, hung or gone can't slow them down: sends go to the helper's own buffered channel, a send that fails is dropped
-and the next event for that topic is a whole `initial` one again. A list over 200 rows arrives in parts (the first
-`initial`), and an event over 512 KB is dropped. Subscriptions end with the run.
+slow, hung or gone can't slow them down: sends go to the helper's own buffered channel. Each event is packed to at
+most 256 KB of UTF-8, so a big window arrives in parts (only the first `initial`), and what a plugin was sent is
+recorded only once every part went out; a send that fails leaves nothing recorded, so that topic's next event is a
+whole `initial` one. The channel drops the oldest waiting events when a helper falls 4 MB or 1,000 events behind and
+marks the next line `"dropped": N` (`docs/automation.md` › Limits). The SDK answers that by sending
+`state.subscribe {topics, resync: true}`, and Ardia then sends every subscribed topic whole again; a sidecar should do
+the same. Navigation commits lost that way don't come back. Subscriptions end with the run.
 
 **Intents** (`state/plugins/stateIntents.ts`) are the only state a plugin may change this way, and each must be listed:
 
@@ -576,7 +582,7 @@ and the next event for that topic is a whole `initial` one again. A list over 20
 | `tabs.move` | `{tabs, before? \| after?, group? (id or null), window?}` | moves the tabs; it needs a destination |
 | `tabs.pin` | `{tabs, as? ("tile" or "row")}` | |
 | `tabs.unpin` | `{tabs}` | |
-| `tabs.mute`, `tabs.unmute` | `{tabs}` | |
+| `tabs.mute`, `tabs.unmute` | `{tabs}` | the tabs only; a muted site in Settings stays muted, and `tabs.unmute` on one of its tabs is `refused` |
 | `tabs.activate` | `{tab}` | |
 | `groups.update` | `{group, name?, color?, icon?, collapsed?}` | at least one change |
 
@@ -584,8 +590,14 @@ and the next event for that topic is a whole `initial` one again. A list over 20
   1 to 100 distinct ids, and every id must be a tab, group or normal window the plugin could see (never private) or the
   request is `refused`. Names are at most 200 characters with no control or direction characters; colours and icons
   are the ones Ardia's picker has.
+- `tabs.move` and `tabs.group` never change a tab's profile or whether it is pinned, checked before anything moves and
+  again just before it runs: a destination in another profile (an anchor, a group or a window showing another profile)
+  is `refused`, so is a move that would put an unpinned tab among pins or a pinned one (a tile, a row or a member of a
+  pinned group) anywhere else, and so is a window move of a pinned tab. `tabs.group` takes only unpinned tabs of one
+  window and profile. Use `tabs.pin` and `tabs.unpin` to change pins. Tabs in a split move with their split.
 - No profile, URL, group name lookup or `$N` reference is accepted, and no intent writes anything else: not
-  `plugins.json`, consent or approvals, the Keychain or secrets, permissions, update pins, settings or profiles. An
+  `plugins.json`, consent or approvals, the Keychain or secrets, permissions, update pins, settings (muted sites
+  included) or profiles. An
   intent name Ardia doesn't list is `bad_request`; a listed one the manifest doesn't is `refused`.
 - Ardia runs it through the same operations as `apply` (`workspaceOps.ts`), one at a time, and checks again before each
   that the run is current and still holds the intent. The answer is `{ok: true}` (with `group` for `tabs.group`) or an
@@ -1024,7 +1036,7 @@ Requests from the helper (`{"id", "method", "params"}`):
 | `run` `{"command", "arg"?, "window"?, "tab"?}` | `commands` | as on the socket |
 | `open` `{"urls", "activate"?}` | `commands` | opens 1 to 10 `http:` or `https:` URLs as background tabs in the last focused window (`activate` selects the first there without raising the window). Each URL, at most 2048 characters, is parsed whole as http or https with a host, before anything opens: the host as written must be ASCII (a Unicode name is refused; send it in punycode, `xn--`), with no user name or password and a port from 1 to 65535; an IPv6 host is put in its short form, and dotted IPv4 must have four parts. Raw spaces (percent-encode them), backslashes and control characters are refused before parsing. What opens is the normalised address: scheme and host lower-cased, the default port dropped, non-ASCII in the path, query and fragment percent-encoded as UTF-8, everything else as given. Anything else (`file:`, a path, `ardia:` or `chrome:` pages, `about:`, `javascript:`, `data:`, `ardia-plugin:`) is `bad_request`, and the message names the first bad entry, as in `urls[1] isn't a valid address`. It runs only while the run that asked is still the plugin's current run and still has `commands`; one queued behind other work when that stops opens nothing. Answers `{"ok": true, "tabs": [ids]}`: the tabs it made, nothing else |
 | `apply` `{"ops"}` | `workspace`, or `tabs: write` for `open`, `tab.close` and `tab.activate` | as on the socket, except that every URL in `open` and `group.create` is read by `open`'s rules above (http or https only). A batch with any other address is `refused` whole before anything in it runs, and the message names the address |
-| `state.subscribe` `{"topics"}` | each topic in `permissions.state.events` | `{"ok": true, "topics"}`, replacing the run's topics (`[]` ends them); then `{"event": "state.<topic>", "time", "data"}` lines ([State events and intents](#state-events-and-intents)). A topic it doesn't list refuses the whole request |
+| `state.subscribe` `{"topics", "resync"?}` | each topic in `permissions.state.events` | `{"ok": true, "topics"}`, replacing the run's topics (`[]` ends them; `resync: true` sends them all whole again); then `{"event": "state.<topic>", "time", "data"}` lines ([State events and intents](#state-events-and-intents)). A topic it doesn't list refuses the whole request |
 | `state.intent` `{"intent", "args"}` | the intent in `permissions.state.intents` | `{"ok": true, "group"?}`, once Ardia's own reducers made the change |
 | `page.post` `{"message", "view"?}` | a `page` | `{"ok": true}`, or `overloaded`: a message to the plugin's page views ([Pages and their helper](#pages-and-their-helper)); `refused` for a plugin with no page, however the method name is spelled in JSON |
 | `page.open` `{"path"?, "split"?, "side"?, "context"?}` | a `page`; `context` needs `tabs` | `{"tabId", "windowId"}`: opens the plugin's page at that path in the last focused window, as a tab or in Split View beside the current tab |
@@ -1229,7 +1241,8 @@ in the local copy. Hourly `usage_counts`:
   `plugin_secret_writes`, `plugin_page_reads` (`activePage` reads), `plugin_decide_calls`,
   `plugin_decide_timeouts`, `plugin_state_events` (state events sent), `plugin_state_events_dropped` (too big, or the
   send failed), `plugin_state_flushes_slow` (building them took over 16 ms), `plugin_state_subscribe_refusals`,
-  `plugin_state_intents` (intents applied) and `plugin_state_intent_refusals`.
+  `plugin_state_resyncs` (a plugin asked for everything again after the channel dropped events), `plugin_state_intents`
+  (intents applied) and `plugin_state_intent_refusals`.
 
 The daily settings snapshot has `plugins_installed`, `plugins_enabled` and, among those on, how many use each part:
 `plugins_with_settings`, `plugins_with_commands`, `plugins_with_page`, `plugins_with_process`,

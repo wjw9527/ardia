@@ -10,7 +10,8 @@ const { usePlugins } = await import("./store.ts");
 const lifecycle = await import("./lifecycle.ts");
 const { ensurePluginActivated } = await import("./activation.ts");
 const { settledStops } = await import("./process.ts");
-const { flushStateEvents, stateSubscriberCount, STATE_CHUNK } = await import("./stateEvents.ts");
+const { flushStateEvents, stateSubscriberCount, packedEvents, STATE_EVENT_BUDGET_BYTES } = await import("./stateEvents.ts");
+const { notePluginStateCommit } = await import("./stateCommits.ts");
 const { consentLines } = await import("./consent.ts");
 const { redactedDownloads, pluginStateUrl } = await import("./pluginEventRedaction.ts");
 const { readManifest } = await import("../../lib/pluginManifest.ts");
@@ -192,9 +193,7 @@ test("events arrive after the commit, coalesced, as diffs: one change, one small
   assert.deepEqual(Object.keys(changed).sort(), [tab, ...Object.keys(changed).filter((id) => id !== tab)].sort());
   assert.ok(Object.values(changed).every((t) => t.id === tab || t.active === false), "only the new tab, and the one it took over from");
   assert.equal(tabs[0].initial, undefined);
-  const commits = stateEvents("watcher", "navigation");
-  assert.equal(commits.length, 1);
-  assert.deepEqual(commits[0].commits.map((c) => [c.tabId, c.url]), [[tab, "https://b.example/page49"]]);
+  assert.deepEqual(stateEvents("watcher", "navigation"), [], "an address written to the store isn't a commit");
   assert.ok(!JSON.stringify(host.events).includes("secret="));
   host.events.length = 0;
   S().closeTab(tab);
@@ -209,7 +208,7 @@ test("events arrive after the commit, coalesced, as diffs: one change, one small
   assert.equal(stateSubscriberCount(), 0);
 });
 
-test("navigation never reports a file, internal or private page", async () => {
+test("navigation comes from the engine's commits: a pending address never emits, a same-address commit does", async () => {
   let w, priv;
   await subscribed(WATCHER, ["navigation"], () => {
     w = S().createWindow({ url: "https://a.example/" });
@@ -217,12 +216,36 @@ test("navigation never reports a file, internal or private page", async () => {
   });
   host.events.length = 0;
   const tab = activeTabId(S(), w);
-  S().updateTab(tab, { url: "file:///etc/passwd" });
-  S().updateTab(activeTabId(S(), priv), { url: "https://p.example/secret" });
+  const at = Date.now() + 1000;
+  S().navigate(tab, "https://pending.example/typed");
+  S().updateTab(tab, { url: "https://pending.example/written" });
   flushStateEvents();
-  S().updateTab(tab, { url: "ardia://downloads" });
+  assert.deepEqual(stateEvents("watcher", "navigation"), [], "a navigation that hasn't committed is never reported");
+  notePluginStateCommit(tab, "https://a.example/", at);
   flushStateEvents();
-  assert.deepEqual(stateEvents("watcher", "navigation"), []);
+  notePluginStateCommit(tab, "https://a.example/", at + 1);
+  flushStateEvents();
+  notePluginStateCommit(tab, "https://a.example/", at + 1);
+  flushStateEvents();
+  notePluginStateCommit(tab, "https://a.example/#part", at + 1);
+  flushStateEvents();
+  const commits = stateEvents("watcher", "navigation").flatMap((e) => e.commits);
+  assert.deepEqual(commits.map((c) => [c.tabId, c.url, c.sameDocument]), [
+    [tab, "https://a.example/", false],
+    [tab, "https://a.example/", false],
+    [tab, "https://a.example/", true],
+  ], "a reload of the same address is a commit; a repeated report isn't");
+  host.events.length = 0;
+  notePluginStateCommit(tab, "file:///etc/passwd", at + 2);
+  notePluginStateCommit(tab, "ardia://downloads", at + 3);
+  notePluginStateCommit(tab, "https://user:pw@login.example/", at + 4);
+  notePluginStateCommit(activeTabId(S(), priv), "https://p.example/secret", at + 5);
+  flushStateEvents();
+  assert.deepEqual(stateEvents("watcher", "navigation"), [], "no file, internal, credentialed or private commit");
+  notePluginStateCommit(tab, "https://b.example/1", at + 6);
+  notePluginStateCommit(tab, "https://b.example/2", at + 7);
+  flushStateEvents();
+  assert.deepEqual(stateEvents("watcher", "navigation").flatMap((e) => e.commits).map((c) => c.url), ["https://b.example/2"], "commits coalesce per tab");
 });
 
 test("download events leave out private downloads, where files were saved, and addresses the plugin can't see", async () => {
@@ -381,16 +404,141 @@ test("a slow, hung or throwing plugin never blocks or breaks a commit", async ()
   assert.ok(takePluginCounts().plugin_state_events_dropped >= 1);
 });
 
-test("a big window arrives in chunks", async () => {
+test("a big window arrives in parts sized by encoded bytes, and only the first is initial", async () => {
+  const wide = "\u{1F600}".repeat(240);
   await subscribed(WATCHER, ["tabs"], () => {
     const w = S().createWindow({ url: "https://a.example/" });
-    for (let i = 0; i < STATE_CHUNK + 10; i++) S().newTab(w, { url: `https://n${i}.example/` });
+    for (let i = 0; i < 600; i++) S().updateTab(S().newTab(w, { url: `https://n${i}.example/` }), { title: `${wide}${i}` });
   });
-  const parts = stateEvents("watcher", "tabs");
-  assert.equal(parts.length, 2);
+  const lines = host.events.filter((e) => e.name === "watcher" && JSON.parse(e.line).event === "state.tabs").map((e) => e.line);
+  assert.ok(lines.length > 1, "split into parts");
+  for (const line of lines) assert.ok(new TextEncoder().encode(line).length <= STATE_EVENT_BUDGET_BYTES + 1024, "each part fits its byte budget");
+  const parts = lines.map((l) => JSON.parse(l).data);
   assert.equal(parts[0].initial, true);
-  assert.equal(parts[1].initial, undefined);
-  assert.equal(parts[0].tabs.length + parts[1].tabs.length, STATE_CHUNK + 11);
+  assert.ok(parts.slice(1).every((p) => p.initial === undefined));
+  assert.equal(parts.reduce((n, p) => n + p.tabs.length, 0), 601);
+});
+
+test("packedEvents never puts more than its budget in one event, keeps every row, and sends nothing when nothing changed", () => {
+  const rows = Array.from({ length: 50 }, (_, i) => ({ id: `t${i}`, title: "\u00e9".repeat(100) }));
+  const events = packedEvents({ tabs: rows, removed: ["x", "y"] }, true, 2048);
+  assert.ok(events.length > 1);
+  for (const e of events) assert.ok(new TextEncoder().encode(JSON.stringify(e)).length <= 2048 + 64);
+  assert.deepEqual(events.flatMap((e) => e.tabs).map((r) => r.id), rows.map((r) => r.id));
+  assert.deepEqual(events.flatMap((e) => e.removed), ["x", "y"]);
+  assert.equal(events[0].initial, true);
+  assert.deepEqual(packedEvents({ tabs: [], removed: [] }, false), []);
+  assert.deepEqual(packedEvents({ tabs: [], removed: [] }, true), [{ initial: true, tabs: [], removed: [] }]);
+});
+
+test("resync after the channel dropped events sends every subscribed topic whole again", async () => {
+  let w;
+  const run = await subscribed(WATCHER, ["tabs", "workspace"], () => (w = S().createWindow({ url: "https://a.example/" })));
+  S().newTab(w, { url: "https://b.example/" });
+  flushStateEvents();
+  host.events.length = 0;
+  flushStateEvents();
+  assert.equal(host.events.length, 0);
+  assert.deepEqual((await ask("watcher", "state.subscribe", { topics: ["tabs", "workspace"], resync: true }, run)).result, { ok: true, topics: ["tabs", "workspace"] });
+  flushStateEvents();
+  const tabs = stateEvents("watcher", "tabs");
+  assert.equal(tabs[0].initial, true);
+  assert.equal(tabs[0].tabs.length, 2);
+  assert.equal(stateEvents("watcher", "workspace")[0].initial, true);
+  assert.equal((await ask("watcher", "state.subscribe", { topics: ["tabs"], resync: "yes" }, run)).error.code, "bad_request");
+  assert.equal(takePluginCounts().plugin_state_resyncs, 1);
+});
+
+test("focusing a private window never shows in a public window's focus", async () => {
+  let a, b, priv;
+  await subscribed(WATCHER, ["workspace"], () => {
+    a = S().createWindow({ url: "https://a.example/" });
+    b = S().createWindow({ url: "https://b.example/" });
+    priv = S().createWindow({ kind: "private", url: "https://p.example/" });
+    S().setFocusedWindow(a);
+  });
+  const focusedOf = (event) => Object.fromEntries(event.windows.map((x) => [x.id, x.focused]));
+  assert.deepEqual(focusedOf(stateEvents("watcher", "workspace")[0]), { [a]: true, [b]: false });
+  host.events.length = 0;
+  S().setFocusedWindow(priv);
+  flushStateEvents();
+  assert.deepEqual(stateEvents("watcher", "workspace"), [], "nothing changes when a private window takes focus");
+  S().setFocusedWindow(b);
+  flushStateEvents();
+  assert.deepEqual(focusedOf(stateEvents("watcher", "workspace")[0]), { [a]: false, [b]: true });
+});
+
+test("percent-encoded or malformed secret query names are cut from tabs, navigation and downloads", async () => {
+  const urls = ["https://a.example/cb?%74oken=s3cret", "https://a.example/cb?%61pi_key=x", "https://a.example/cb?q=%E0%A4%A", "https://a.example/cb?%2574oken=y"];
+  let w, tabs;
+  await subscribed(FULL, ["tabs", "navigation", "downloads"], () => {
+    w = S().createWindow({ url: "https://start.example/" });
+    tabs = urls.map((url) => S().newTab(w, { url }));
+    urls.forEach((url, i) => S().upsertDownload(download({ id: `enc${i}`, url })));
+  });
+  urls.forEach((url, i) => notePluginStateCommit(tabs[i], url, Date.now() + 1000 + i));
+  flushStateEvents();
+  const sent = JSON.stringify(host.events.filter((e) => e.name === "full").map((e) => JSON.parse(e.line)));
+  for (const leak of ["s3cret", "%74oken", "%61pi_key", "%E0%A4%A", "%2574oken"]) assert.ok(!sent.includes(leak), leak);
+  assert.ok(stateEvents("full", "tabs")[0].tabs.some((t) => t.url === "https://a.example/cb"));
+  assert.ok(stateEvents("full", "navigation").flatMap((e) => e.commits).every((c) => c.url === "https://a.example/cb"));
+  assert.ok(stateEvents("full", "downloads")[0].downloads.every((d) => d.url === "https://a.example/cb" || !d.id.startsWith("enc")));
+});
+
+test("tabs.mute and tabs.unmute change only the tab, never the muted sites in settings", async () => {
+  await enable(ACTOR);
+  const w = S().createWindow({ url: "https://loud.example/" });
+  const loud = activeTabId(S(), w);
+  const quiet = S().newTab(w, { url: "https://quiet.example/" });
+  S().updateSettings({ mutedSites: ["loud.example"] });
+  const run = await activated("actor");
+  const sites = () => JSON.stringify(S().settings.mutedSites);
+  const before = sites();
+  const refused = await ask("actor", "state.intent", { intent: "tabs.unmute", args: { tabs: [loud] } }, run);
+  assert.equal(refused.error.code, "refused");
+  assert.match(refused.error.message, /muted in Ardia's settings/);
+  assert.equal(sites(), before);
+  assert.equal((await ask("actor", "state.intent", { intent: "tabs.mute", args: { tabs: [quiet, loud] } }, run)).result.ok, true);
+  assert.equal(S().tabs[quiet].muted, true);
+  assert.equal(sites(), before);
+  assert.equal((await ask("actor", "state.intent", { intent: "tabs.unmute", args: { tabs: [quiet] } }, run)).result.ok, true);
+  assert.equal(S().tabs[quiet].muted, false);
+  assert.equal(sites(), before, "the synced muted sites never change");
+  S().updateSettings({ mutedSites: [] });
+});
+
+test("tabs.move and tabs.group never change a tab's profile or whether it is pinned", async () => {
+  await enable(ACTOR);
+  const work = S().createProfile({ name: "Work" });
+  const w = S().createWindow({ url: "https://a.example/" });
+  const a = activeTabId(S(), w);
+  const b = S().newTab(w, { url: "https://b.example/" });
+  const pinned = S().newTab(w, { url: "https://pinned.example/" });
+  S().pinTabs([pinned], true, true);
+  const ww = S().createWindow({ url: "https://work.example/", profileId: work });
+  const workTab = activeTabId(S(), ww);
+  const run = await activated("actor");
+  const intent = (name, args) => ask("actor", "state.intent", { intent: name, args }, run);
+  const snapshot = () => JSON.stringify([a, b, pinned, workTab].map((id) => [S().tabs[id].profileId, S().tabs[id].windowId, S().tabs[id].pin]));
+  const before = snapshot();
+  for (const [name, args, why] of [
+    ["tabs.move", { tabs: [a], before: workTab }, /another profile/],
+    ["tabs.move", { tabs: [a], window: ww }, /another profile/],
+    ["tabs.move", { tabs: [workTab], before: a }, /another profile/],
+    ["tabs.move", { tabs: [a], before: pinned }, /pin or unpin/],
+    ["tabs.move", { tabs: [pinned], before: b }, /pin or unpin/],
+    ["tabs.move", { tabs: [pinned], group: null }, /pin or unpin/],
+    ["tabs.group", { tabs: [a, workTab] }, /another window or profile/],
+    ["tabs.group", { tabs: [a, pinned] }, /only unpinned/],
+  ]) {
+    const reply = await intent(name, args);
+    assert.equal(reply.error?.code, "refused", `${name} ${JSON.stringify(args)}`);
+    assert.match(reply.error.message, why);
+    assert.equal(snapshot(), before, `${name} ${JSON.stringify(args)} changed nothing`);
+  }
+  assert.equal((await intent("tabs.move", { tabs: [b], before: a })).result.ok, true);
+  assert.equal(S().tabs[b].pin, null);
+  assert.equal(S().tabs[b].profileId, S().tabs[a].profileId);
 });
 
 test("subscriptions end with the run", async () => {

@@ -12,6 +12,7 @@ export function createSubscriptionSync(rpc: Rpc, registry: Registry, report: (er
   let acknowledgedTopics = "";
   let queued = false;
   let inFlight = false;
+  let resyncing = false;
 
   const wantedEvents = () => [...registry.events.keys()].filter((name) => name !== "plugin.values").sort();
   const wantedTopics = () => [...registry.state.keys()].sort();
@@ -62,5 +63,23 @@ export function createSubscriptionSync(rpc: Rpc, registry: Registry, report: (er
     }
   }
 
-  return { sync, deliverState };
+  async function resync() {
+    if (!live() || resyncing || !registry.state.size) return;
+    resyncing = true;
+    try {
+      const topics = wantedTopics();
+      await rpc.request(M.stateSubscribe, { topics, resync: true });
+      acknowledgedTopics = topics.join(",");
+    } catch (error) {
+      report(error);
+    } finally {
+      resyncing = false;
+    }
+  }
+
+  const noteDropped = (dropped: unknown) => {
+    if (typeof dropped === "number" && dropped > 0) void resync();
+  };
+
+  return { sync, deliverState, noteDropped };
 }

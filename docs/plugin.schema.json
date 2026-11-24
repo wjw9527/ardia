@@ -232,7 +232,74 @@
             "description": "Redacted state events it hears and tab and group intents it may ask for"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "properties": {
+              "state": {
+                "anyOf": [
+                  {
+                    "const": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "events": {
+                        "type": "array",
+                        "items": {
+                          "enum": [
+                            "downloads"
+                          ]
+                        }
+                      },
+                      "intents": {
+                        "maxItems": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "required": [
+              "tabs"
+            ],
+            "properties": {
+              "tabs": {
+                "enum": [
+                  "read",
+                  "write"
+                ]
+              },
+              "state": {
+                "anyOf": [
+                  {
+                    "const": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "intents": {
+                        "maxItems": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "required": [
+              "tabs"
+            ],
+            "properties": {
+              "tabs": {
+                "const": "write"
+              }
+            }
+          }
+        ]
       },
       "contributes": {
         "type": "object",

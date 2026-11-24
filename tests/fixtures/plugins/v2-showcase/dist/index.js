@@ -923,6 +923,7 @@
     let acknowledgedTopics = "";
     let queued = false;
     let inFlight = false;
+    let resyncing = false;
     const wantedEvents = () => [...registry.events.keys()].filter((name) => name !== "plugin.values").sort();
     const wantedTopics = () => [...registry.state.keys()].sort();
     const sync = () => {
@@ -968,7 +969,23 @@
         }
       }
     }
-    return { sync, deliverState };
+    async function resync() {
+      if (!live() || resyncing || !registry.state.size) return;
+      resyncing = true;
+      try {
+        const topics = wantedTopics();
+        await rpc.request(HOST_METHODS.stateSubscribe, { topics, resync: true });
+        acknowledgedTopics = topics.join(",");
+      } catch (error) {
+        report(error);
+      } finally {
+        resyncing = false;
+      }
+    }
+    const noteDropped = (dropped) => {
+      if (typeof dropped === "number" && dropped > 0) void resync();
+    };
+    return { sync, deliverState, noteDropped };
   }
 
   var SDK_VERSION = "2.0.0";
@@ -1182,6 +1199,7 @@
         });
       }
       if (typeof record.event === "string") {
+        subscriptions.noteDropped(record.dropped);
         const data = typeof record.data === "object" && record.data !== null ? record.data : {};
         const time = typeof record.time === "number" ? record.time : void 0;
         if (record.event === "plugin.values") return deliverEvent(record.event, data, time);

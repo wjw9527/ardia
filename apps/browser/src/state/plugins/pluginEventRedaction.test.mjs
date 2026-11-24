@@ -86,3 +86,16 @@ test("a state event's address is http or https only, never a file, internal, plu
     assert.equal(pluginStateUrl(`https://a.example/cb?ok=1&${secret}#f`, full), "https://a.example/cb", secret);
   }
 });
+
+test("a query name is decoded before it is judged, and a query that can't be decoded is cut whole", async () => {
+  const { pluginStateUrl, hasSecretParam } = await import("./pluginEventRedaction.ts");
+  const full = { full: true, urls: true };
+  for (const query of ["%74oken=secret", "%61pi_key=x", "%2574oken=y", "a=1&%73ession=z", "pass%77ord=1", "q=%E0%A4%A", "%E0%A4%A=1", "x+token=1"]) {
+    assert.equal(hasSecretParam(query), true, query);
+    assert.equal(pluginStateUrl(`https://a.example/cb?${query}#f`, full), "https://a.example/cb", query);
+  }
+  for (const query of ["page=2", "q=a+b%20c", "lang=%C3%A9"]) {
+    assert.equal(hasSecretParam(query), false, query);
+    assert.equal(pluginStateUrl(`https://a.example/cb?${query}#f`, full), `https://a.example/cb?${query}`, query);
+  }
+});

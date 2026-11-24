@@ -145,7 +145,7 @@ export type TabsChange = { initial?: true; tabs: StateTab[]; removed: string[] }
 
 export type WorkspaceChange = { initial?: true; windows: StateWindow[]; groups: StateGroup[]; removedWindows: string[]; removedGroups: string[] };
 
-export type NavigationCommit = { tabId: string; windowId: string; url: string; title: string | null };
+export type NavigationCommit = { tabId: string; windowId: string; url: string; title: string | null; sameDocument: boolean };
 
 export type NavigationChange = { commits: NavigationCommit[] };
 

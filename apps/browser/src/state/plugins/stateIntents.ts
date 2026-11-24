@@ -9,11 +9,12 @@ import type { Body } from "../automation/controlSocket";
 import { eligibleKind, isEligibleTab } from "../automation/automationWindows";
 import { isEligibleGroup } from "../automation/workspaceTree";
 import { applyMethod } from "../automation/workspaceMethods";
-import { iconValue } from "../automation/workspaceOps";
+import { iconValue, type Op } from "../automation/workspaceOps";
 import { notePlugin } from "../telemetry/pluginCounts";
 import { consentToken } from "../telemetry/choice";
 import { acceptsRun } from "./process";
 import { activeManifest, currentPlugins } from "./store";
+import { intentProblem, type GuardProblem } from "./stateIntentGuards";
 
 export const MAX_INTENT_TABS = 100;
 const MAX_NAME = 200;
@@ -139,16 +140,46 @@ export async function runIntent(c: Caller, m: PluginManifest, params: Record<str
     notePlugin("plugin_state_intent_refusals", consent);
     return failure(parsed.code, parsed.message);
   }
-  const allowed = stillGranted(c, parsed.intent);
-  const body = await applyMethod({ ops: [parsed.op] }, allowed, 0, () => ({ error: "An intent opens no addresses." }));
+  const granted = stillGranted(c, parsed.intent);
+  const op = parsed.intent === "tabs.group" ? { ...parsed.op, pinned: false } : parsed.op;
+  const early = intentProblem(useBrowser.getState(), parsed.intent, op as Op);
+  if (early) {
+    notePlugin("plugin_state_intent_refusals", consent);
+    return failure(early.code, early.message);
+  }
+  if (parsed.intent === "tabs.mute" || parsed.intent === "tabs.unmute") return muteTabs(op.tabs as string[], parsed.intent === "tabs.mute", consent);
+  let late: GuardProblem | null = null;
+  const allowed = () => {
+    if (!granted()) return false;
+    late = intentProblem(useBrowser.getState(), parsed.intent, op as Op);
+    return late === null;
+  };
+  const body = await applyMethod({ ops: [op] }, allowed, 0, () => ({ error: "An intent opens no addresses." }));
   const applied = "result" in body ? (body.result as Applied) : null;
   if (!applied?.ok) {
     notePlugin("plugin_state_intent_refusals", consent);
-    if (!allowed()) return failure("refused", "This run of the plugin has ended or lost that intent, so nothing changed.");
+    const changedUnder = late as GuardProblem | null;
+    if (changedUnder) return failure(changedUnder.code, changedUnder.message);
+    if (!granted()) return failure("refused", "This run of the plugin has ended or lost that intent, so nothing changed.");
     const error = "error" in body ? body.error : applied?.error;
     return failure(error?.code === "no_window" ? "refused" : "failed", error?.message?.replace(/the ardia command/g, "this plugin") ?? "The change couldn't be made.");
   }
   notePlugin("plugin_state_intents", consent);
   const group = applied.results?.[0]?.group;
   return { result: { ok: true, ...(typeof group === "string" && isEligibleGroup(useBrowser.getState(), group) ? { group } : {}) } };
+}
+
+function muteTabs(ids: string[], muted: boolean, consent: ReturnType<typeof consentToken>): Body {
+  const s = useBrowser.getState();
+  if (ids.some((id) => !isEligibleTab(s, id))) {
+    notePlugin("plugin_state_intent_refusals", consent);
+    return failure("refused", "A tab named isn't one this plugin may use.");
+  }
+  s.setMuted(ids, muted);
+  if (ids.some((id) => useBrowser.getState().tabs[id]?.muted !== muted)) {
+    notePlugin("plugin_state_intent_refusals", consent);
+    return failure("failed", `Ardia didn't ${muted ? "mute" : "unmute"} every tab named.`);
+  }
+  notePlugin("plugin_state_intents", consent);
+  return { result: { ok: true } };
 }

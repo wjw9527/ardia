@@ -46,7 +46,7 @@ export const routeLinkTabs = (urls: string[]) => call("tabs.routeLinkTabs", { ur
 export const onTabStripTransaction = (listener: (tx: TabStripTransaction) => void) => on("tabs.strips", listener);
 export const onWindowRequest = (listener: (request: WindowRequest) => void) => on("tabs.windowRequest", listener);
 export const tabStrips = () => call("tabs.strips");
-type CommitReader = "automation" | "pageBars";
+type CommitReader = "automation" | "pageBars" | "pluginState";
 
 const commitReaders = new Set<CommitReader>();
 let reportsSent: boolean | null = false;

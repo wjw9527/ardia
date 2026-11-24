@@ -7,7 +7,6 @@ import { downloadSession } from "../downloads/downloadsSlice";
 import { eligibleKind, isEligibleTab, type AutomationWindowKind } from "../automation/automationWindows";
 import { iconName, isEligibleGroup } from "../automation/workspaceTree";
 import { innermostGroupOf } from "../groups/groups";
-import { focusedWindowOf } from "../windows/ui";
 
 export type Redaction = { full: boolean; urls: boolean };
 
@@ -15,12 +14,39 @@ export const redactionFor = (p: PluginPermissions): Redaction => ({ full: p.full
 
 const MAX_TITLE = 500;
 const MAX_FILENAME = 255;
-const SECRET_PARAM = /(^|[?&;])[^=&;#]*(token|secret|password|passwd|pwd|key|auth|session|sig|signature|code|credential)[^=&;#]*=/i;
+const SECRET_NAME = /token|secret|password|passwd|pwd|key|auth|session|sig|signature|code|credential/i;
+const MAX_DECODES = 4;
+
+function decodedName(raw: string): string | null {
+  let name = raw.replace(/\+/g, " ");
+  for (let i = 0; i < MAX_DECODES; i++) {
+    let next: string;
+    try {
+      next = decodeURIComponent(name);
+    } catch {
+      return null;
+    }
+    if (next === name) return name;
+    name = next;
+  }
+  return null;
+}
+
+export function hasSecretParam(query: string): boolean {
+  for (const pair of query.replace(/^\?/, "").split(/[&;]/)) {
+    if (!pair) continue;
+    const at = pair.indexOf("=");
+    const name = decodedName(at < 0 ? pair : pair.slice(0, at));
+    if (name === null || SECRET_NAME.test(name)) return true;
+    if (at >= 0 && decodedName(pair.slice(at + 1)) === null) return true;
+  }
+  return false;
+}
 const CONTROL_CHARS = "[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028-\\u202e\\u2066-\\u2069\\ufeff]";
 const CONTROL = new RegExp(CONTROL_CHARS, "gu");
 const HAS_CONTROL = new RegExp(CONTROL_CHARS, "u");
 
-const cleanText = (text: string, max: number) => text.replace(CONTROL, "").slice(0, max);
+export const cleanStateText = (text: string, max: number) => text.replace(CONTROL, "").slice(0, max);
 
 export function pluginStateUrl(url: string | null | undefined, r: Redaction): string | null {
   if (!r.urls || typeof url !== "string" || url.length > 8192) return null;
@@ -32,7 +58,7 @@ export function pluginStateUrl(url: string | null | undefined, r: Redaction): st
   if (!r.full) return minimizedUrl(url);
   const fragmentless = url.replace(/#.*$/, "");
   const query = /\?[^#]*/.exec(fragmentless)?.[0] ?? "";
-  return SECRET_PARAM.test(query) ? minimizedUrl(url) : fragmentless;
+  return hasSecretParam(query) ? minimizedUrl(url) : fragmentless;
 }
 
 export type TabState = { id: string; windowId: string; index: number; url: string | null; title: string | null; pinned: boolean; active: boolean; groupId: string | null; muted: boolean };
@@ -61,7 +87,7 @@ export function redactedTabs(s: Snapshot, r: Redaction): TabState[] {
         windowId,
         index,
         url,
-        title: url === null ? null : cleanText(t.customTitle || t.title, MAX_TITLE),
+        title: url === null ? null : cleanStateText(t.customTitle || t.title, MAX_TITLE),
         pinned: t.pin !== null,
         active: id === active,
         groupId: group && isEligibleGroup(s, group.id) ? group.id : null,
@@ -73,7 +99,7 @@ export function redactedTabs(s: Snapshot, r: Redaction): TabState[] {
 }
 
 export function redactedWindows(s: Snapshot): WindowState[] {
-  const focused = focusedWindowOf(s);
+  const focused = s.ui.focusOrder.find((id) => eligibleKind(s, id) !== null) ?? null;
   return s.windowOrder.flatMap((id) => {
     const kind = eligibleKind(s, id);
     if (!kind) return [];
@@ -89,7 +115,7 @@ export function redactedGroups(s: Snapshot): GroupState[] {
     .map((g) => ({
       id: g.id,
       windowId: g.windowId,
-      name: cleanText(g.name, MAX_TITLE),
+      name: cleanStateText(g.name, MAX_TITLE),
       color: g.color ?? "neutral",
       icon: iconName(g.icon),
       collapsed: g.collapsed,
@@ -111,8 +137,8 @@ export function redactedDownloads(s: Snapshot, r: Redaction): DownloadState[] {
       dangerous: d.dangerous === true,
       received: Number.isFinite(d.received) ? d.received : 0,
       total: Number.isFinite(d.total) ? d.total : 0,
-      mimeType: cleanText(d.mimeType ?? "", 128),
-      filename: cleanText(baseName(d.filename ?? ""), MAX_FILENAME),
+      mimeType: cleanStateText(d.mimeType ?? "", 128),
+      filename: cleanStateText(baseName(d.filename ?? ""), MAX_FILENAME),
       url: pluginStateUrl(d.url, r),
     }));
 }

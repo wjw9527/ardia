@@ -4,26 +4,32 @@ import type { PluginManifest } from "../../lib/pluginManifest";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { failure } from "../automation/automationMethods";
 import type { Body } from "../automation/controlSocket";
+import { isEligibleTab } from "../automation/automationWindows";
 import { notePlugin, notePluginTimes } from "../telemetry/pluginCounts";
 import { consentToken, type ConsentToken } from "../telemetry/choice";
 import { warnFor } from "../telemetry/consoleConsent";
 import { acceptsRun } from "./process";
 import { activeManifest, currentPlugins } from "./store";
-import { redactedDownloads, redactedGroups, redactedTabs, redactedWindows, redactionFor, type Redaction } from "./pluginEventRedaction";
+import { listenForPluginStateCommits, takePluginStateCommits, type PageCommit } from "./stateCommits";
+import { cleanStateText, pluginStateUrl, redactedDownloads, redactedGroups, redactedTabs, redactedWindows, redactionFor, type Redaction } from "./pluginEventRedaction";
 
 export const STATE_FLUSH_MS = 100;
-export const STATE_CHUNK = 200;
-export const MAX_STATE_EVENT_BYTES = 512 * 1024;
+export const STATE_EVENT_BUDGET_BYTES = 256 * 1024;
+export const MAX_STATE_LINE_BYTES = 1_048_576;
 const SLOW_FLUSH_MS = 16;
 
 type Caller = { name: string; run: number };
 type Sent = Map<string, string>;
 type Subscriber = Caller & { topics: Set<StateTopic>; sent: Map<StateTopic, Sent> };
+type Rows = Map<string, unknown>;
+type Event = Record<string, unknown>;
 
 const subscribers = new Map<string, Subscriber>();
 let dirty = new Set<StateTopic>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 let stopWatching: (() => void) | null = null;
+const encoder = new TextEncoder();
+const byteLength = (text: string) => encoder.encode(text).length;
 
 const keyOf = (c: Caller) => `${c.name}#${c.run}`;
 
@@ -35,17 +41,21 @@ function markDirty(topics: Iterable<StateTopic>) {
 function onCommit(s: BrowserState, prev: BrowserState) {
   const topics: StateTopic[] = [];
   const layout = s.tabs !== prev.tabs || s.windows !== prev.windows || s.windowOrder !== prev.windowOrder || s.groups !== prev.groups || s.peeks !== prev.peeks;
-  if (layout) topics.push("tabs", "navigation", "workspace");
+  if (layout) topics.push("tabs", "workspace");
   else if (s.ui.focusOrder !== prev.ui.focusOrder) topics.push("workspace");
   if (s.downloads !== prev.downloads || s.profiles !== prev.profiles) topics.push("downloads");
   if (topics.length) markDirty(topics);
 }
 
-function watch() {
-  stopWatching ??= useBrowser.subscribeTo(["tabs", "windows", "windowOrder", "groups", "peeks", "ui", "downloads", "profiles"], onCommit);
-}
+const onPageCommit = () => markDirty(["navigation"]);
 
-function unwatchIfIdle() {
+const wantsCommits = () => [...subscribers.values()].some((sub) => sub.topics.has("navigation"));
+
+function syncWatching() {
+  if (subscribers.size) stopWatching ??= useBrowser.subscribeTo(["tabs", "windows", "windowOrder", "groups", "peeks", "ui", "downloads", "profiles"], onCommit);
+  if (wantsCommits()) {
+    listenForPluginStateCommits(onPageCommit, () => Object.values(useBrowser.getState().tabs).map((t): [string, string] => [t.id, t.url]));
+  } else listenForPluginStateCommits(null);
   if (subscribers.size) return;
   stopWatching?.();
   stopWatching = null;
@@ -54,9 +64,12 @@ function unwatchIfIdle() {
   timer = null;
 }
 
+const SUBSCRIBE_KEYS = ["topics", "resync"];
+
 export function subscribeState(c: Caller, m: PluginManifest, params: Record<string, unknown>): Body {
-  const unknown = Object.keys(params).filter((key) => key !== "topics");
-  if (unknown.length) return failure("bad_request", `state.subscribe takes topics, not ${unknown.slice(0, 4).join(", ")}.`);
+  const unknown = Object.keys(params).filter((key) => !SUBSCRIBE_KEYS.includes(key));
+  if (unknown.length) return failure("bad_request", `state.subscribe takes topics and resync, not ${unknown.slice(0, 4).map((k) => k.slice(0, 40)).join(", ")}.`);
+  if (params.resync !== undefined && typeof params.resync !== "boolean") return failure("bad_request", "resync is true or false.");
   const given = params.topics;
   if (!Array.isArray(given) || given.length > STATE_TOPICS.length * 2) return failure("bad_request", `state.subscribe needs topics: a list of ${STATE_TOPICS.join(", ")}.`);
   const bad = given.findIndex((t) => !isStateTopic(t));
@@ -71,133 +84,178 @@ export function subscribeState(c: Caller, m: PluginManifest, params: Record<stri
   const existing = subscribers.get(key);
   if (!topics.size) {
     subscribers.delete(key);
-    unwatchIfIdle();
+    syncWatching();
     return { result: { ok: true, topics: [] } };
   }
   const sub: Subscriber = existing ?? { name: c.name, run: c.run, topics, sent: new Map() };
-  for (const topic of sub.sent.keys()) if (!topics.has(topic)) sub.sent.delete(topic);
-  const added = [...topics].filter((t) => !sub.topics.has(t) || !existing);
+  const resync = params.resync === true;
+  if (resync && existing) notePlugin("plugin_state_resyncs", consentToken());
+  for (const topic of [...sub.sent.keys()]) if (!topics.has(topic) || resync) sub.sent.delete(topic);
+  const added = [...topics].filter((t) => resync || !existing || !sub.topics.has(t));
   sub.topics = topics;
   subscribers.set(key, sub);
-  watch();
-  markDirty(existing ? added : topics);
+  syncWatching();
+  markDirty(added);
   return { result: { ok: true, topics: [...topics] } };
 }
 
 export function dropStateSubscriptions(name: string) {
   for (const [key, sub] of subscribers) if (sub.name === name) subscribers.delete(key);
-  unwatchIfIdle();
+  syncWatching();
 }
 
 export const stateSubscriberCount = () => subscribers.size;
 
-type Projection = { rows: Map<string, unknown> };
-
-function projected(cache: Map<string, Projection>, key: string, make: () => [string, unknown][]): Projection {
+function projected(cache: Map<string, Rows>, key: string, make: () => [string, unknown][]): Rows {
   let hit = cache.get(key);
-  if (!hit) cache.set(key, (hit = { rows: new Map(make()) }));
+  if (!hit) cache.set(key, (hit = new Map(make())));
   return hit;
 }
 
-function projectionOf(topic: StateTopic, s: BrowserState, r: Redaction, cache: Map<string, Projection>): Projection {
-  const level = `${topic}:${r.urls ? (r.full ? "full" : "short") : "none"}`;
+const levelOf = (r: Redaction) => (r.urls ? (r.full ? "full" : "short") : "none");
+
+function rowsOf(topic: Exclude<StateTopic, "navigation">, s: BrowserState, r: Redaction, cache: Map<string, Rows>): Rows {
   switch (topic) {
     case "tabs":
-    case "navigation":
-      return projected(cache, `tabs:${level}`, () => redactedTabs(s, r).map((t) => [t.id, t]));
+      return projected(cache, `tabs:${levelOf(r)}`, () => redactedTabs(s, r).map((t) => [t.id, t]));
     case "workspace":
       return projected(cache, "workspace", () => [...redactedWindows(s).map((w): [string, unknown] => [`w:${w.id}`, w]), ...redactedGroups(s).map((g): [string, unknown] => [`g:${g.id}`, g])]);
     case "downloads":
-      return projected(cache, level, () => redactedDownloads(s, r).map((d) => [d.id, d]));
+      return projected(cache, `downloads:${levelOf(r)}`, () => redactedDownloads(s, r).map((d) => [d.id, d]));
   }
 }
 
-type Diff = { changed: unknown[]; removed: string[]; initial: boolean };
+type Diff = { changed: [string, unknown][]; removed: string[]; initial: boolean; after: Sent };
 
-function diffRows(sub: Subscriber, topic: StateTopic, rows: Map<string, unknown>, signature: (row: unknown) => string): Diff {
+function diffRows(sub: Subscriber, topic: StateTopic, rows: Rows): Diff {
   const before = sub.sent.get(topic);
   const after: Sent = new Map();
-  const changed: unknown[] = [];
+  const changed: [string, unknown][] = [];
   for (const [id, row] of rows) {
-    const sig = signature(row);
+    const sig = JSON.stringify(row);
     after.set(id, sig);
-    if (before?.get(id) !== sig) changed.push(row);
+    if (before?.get(id) !== sig) changed.push([id, row]);
   }
   const removed = before ? [...before.keys()].filter((id) => !after.has(id)) : [];
-  sub.sent.set(topic, after);
-  return { changed, removed, initial: !before };
+  return { changed, removed, initial: !before, after };
 }
 
-function chunks<T>(list: T[]): T[][] {
-  if (list.length <= STATE_CHUNK) return [list];
-  const out: T[][] = [];
-  for (let i = 0; i < list.length; i += STATE_CHUNK) out.push(list.slice(i, i + STATE_CHUNK));
-  return out;
-}
-
-function send(sub: Subscriber, topic: StateTopic, data: Record<string, unknown>, time: number, consent: ConsentToken | null): number {
-  const line = JSON.stringify({ event: `state.${topic}`, time, data });
-  if (line.length > MAX_STATE_EVENT_BYTES) {
-    notePlugin("plugin_state_events_dropped", consent);
-    return 0;
+export function packedEvents(fields: Record<string, unknown[]>, initial: boolean, budget = STATE_EVENT_BUDGET_BYTES): Event[] {
+  const names = Object.keys(fields);
+  const empty = (): Event => Object.fromEntries(names.map((n) => [n, [] as unknown[]]));
+  const overhead = byteLength(JSON.stringify(empty())) + 32;
+  const events: Event[] = [];
+  let current = empty();
+  let size = overhead;
+  let inCurrent = 0;
+  let total = 0;
+  for (const name of names) {
+    for (const item of fields[name]!) {
+      const bytes = byteLength(JSON.stringify(item)) + 1;
+      if (inCurrent && size + bytes > budget) {
+        events.push(current);
+        current = empty();
+        size = overhead;
+        inCurrent = 0;
+      }
+      (current[name] as unknown[]).push(item);
+      size += bytes;
+      inCurrent++;
+      total++;
+    }
   }
-  sendToPlugin(sub.name, sub.run, line);
-  return 1;
+  if (!total && !initial) return [];
+  if (inCurrent || !events.length) events.push(current);
+  if (initial) events[0] = { initial: true, ...events[0] };
+  return events;
 }
 
-function eventsFor(sub: Subscriber, topic: StateTopic, p: Projection): Record<string, unknown>[] {
-  if (topic === "navigation") {
-    const urlOf = (row: unknown) => (row as { url: string | null }).url ?? "";
-    const before = sub.sent.get(topic);
-    const { changed } = diffRows(sub, topic, p.rows, urlOf);
-    if (!before) return [];
-    const commits = changed
-      .map((row) => row as { id: string; windowId: string; url: string | null; title: string | null })
-      .filter((t) => t.url !== null)
-      .map((t) => ({ tabId: t.id, windowId: t.windowId, url: t.url, title: t.title }));
-    return chunks(commits).filter((c) => c.length).map((c) => ({ commits: c }));
-  }
-  const { changed, removed, initial } = diffRows(sub, topic, p.rows, (row) => JSON.stringify(row));
+function eventsFor(diff: Diff, topic: Exclude<StateTopic, "navigation">): Event[] {
+  const { changed, removed, initial } = diff;
   if (!initial && !changed.length && !removed.length) return [];
   if (topic === "workspace") {
-    const windows = changed.filter((row) => (row as { kind?: unknown }).kind !== undefined);
-    const groups = changed.filter((row) => (row as { kind?: unknown }).kind === undefined);
     const gone = (prefix: string) => removed.filter((id) => id.startsWith(prefix)).map((id) => id.slice(prefix.length));
-    return [{ ...(initial ? { initial: true } : {}), windows, groups, removedWindows: gone("w:"), removedGroups: gone("g:") }];
+    return packedEvents(
+      {
+        windows: changed.filter(([id]) => id.startsWith("w:")).map(([, row]) => row),
+        groups: changed.filter(([id]) => id.startsWith("g:")).map(([, row]) => row),
+        removedWindows: gone("w:"),
+        removedGroups: gone("g:"),
+      },
+      initial,
+    );
   }
-  const field = topic === "tabs" ? "tabs" : "downloads";
-  return chunks(changed).map((part, i) => ({ ...(initial && i === 0 ? { initial: true } : {}), [field]: part, removed: i === 0 ? removed : [] }));
+  return packedEvents({ [topic]: changed.map(([, row]) => row), removed }, initial);
+}
+
+function commitsFor(s: BrowserState, commits: PageCommit[], r: Redaction): Event[] {
+  const shown = commits.flatMap((c) => {
+    const t = s.tabs[c.tabId];
+    if (!t || !isEligibleTab(s, c.tabId)) return [];
+    const url = pluginStateUrl(c.url, r);
+    if (url === null) return [];
+    const title = t.url === c.url ? cleanStateText(t.customTitle || t.title, 500) : null;
+    return [{ tabId: c.tabId, windowId: t.windowId, url, title, sameDocument: c.sameDocument }];
+  });
+  return shown.length ? packedEvents({ commits: shown }, false) : [];
+}
+
+function sendAll(sub: Subscriber, topic: StateTopic, events: Event[], time: number): number {
+  const lines = events.map((data) => JSON.stringify({ event: `state.${topic}`, time, data }));
+  if (lines.some((line) => byteLength(line) > MAX_STATE_LINE_BYTES)) throw new Error("A state event is larger than the channel takes.");
+  for (const line of lines) sendToPlugin(sub.name, sub.run, line);
+  return lines.length;
+}
+
+function deliver(sub: Subscriber, topic: StateTopic, s: BrowserState, r: Redaction, cache: Map<string, Rows>, commits: PageCommit[], time: number): number {
+  if (topic === "navigation") return sendAll(sub, topic, commitsFor(s, commits, r), time);
+  const diff = diffRows(sub, topic, rowsOf(topic, s, r, cache));
+  const count = sendAll(sub, topic, eventsFor(diff, topic), time);
+  sub.sent.set(topic, diff.after);
+  return count;
+}
+
+type Delivered = { state: number; navigation: number };
+
+function flushFor(sub: Subscriber, topics: Set<StateTopic>, s: BrowserState, cache: Map<string, Rows>, commits: PageCommit[], time: number, consent: ConsentToken | null): Delivered {
+  const delivered: Delivered = { state: 0, navigation: 0 };
+  const m = activeManifest(currentPlugins(), sub.name);
+  if (!m || !acceptsRun(sub.name, sub.run)) {
+    subscribers.delete(keyOf(sub));
+    return delivered;
+  }
+  const r = redactionFor(m.permissions);
+  for (const topic of sub.topics) {
+    if (!topics.has(topic) || !grantsTopic(m.permissions.state, topic)) continue;
+    try {
+      delivered[topic === "navigation" ? "navigation" : "state"] += deliver(sub, topic, s, r, cache, commits, time);
+    } catch (error) {
+      sub.sent.delete(topic);
+      notePlugin("plugin_state_events_dropped", consent);
+      warnFor(consent, "[plugins] a state event couldn't be sent", error);
+    }
+  }
+  return delivered;
 }
 
 export function flushStateEvents() {
   timer = null;
   const topics = dirty;
   dirty = new Set();
+  const commits = takePluginStateCommits();
   if (!topics.size || !subscribers.size) return;
   const started = Date.now();
   const consent = consentToken();
   const s = useBrowser.getState();
-  const cache = new Map<string, Projection>();
-  let sent = 0;
-  for (const [key, sub] of [...subscribers]) {
-    const m = activeManifest(currentPlugins(), sub.name);
-    if (!m || !acceptsRun(sub.name, sub.run)) {
-      subscribers.delete(key);
-      continue;
-    }
-    const r = redactionFor(m.permissions);
-    for (const topic of sub.topics) {
-      if (!topics.has(topic) || !grantsTopic(m.permissions.state, topic)) continue;
-      try {
-        for (const data of eventsFor(sub, topic, projectionOf(topic, s, r, cache))) sent += send(sub, topic, data, started, consent);
-      } catch (error) {
-        sub.sent.delete(topic);
-        notePlugin("plugin_state_events_dropped", consent);
-        warnFor(consent, "[plugins] a state event couldn't be sent", error);
-      }
-    }
+  const cache = new Map<string, Rows>();
+  const total: Delivered = { state: 0, navigation: 0 };
+  for (const sub of [...subscribers.values()]) {
+    const delivered = flushFor(sub, topics, s, cache, commits, started, consent);
+    total.state += delivered.state;
+    total.navigation += delivered.navigation;
   }
-  notePluginTimes("plugin_state_events", sent, consent);
+  notePluginTimes("plugin_state_events", total.state, consent);
+  notePluginTimes("plugin_state_events", total.navigation, commits[0]?.consent ?? consent);
   if (Date.now() - started > SLOW_FLUSH_MS) notePlugin("plugin_state_flushes_slow", consent);
-  unwatchIfIdle();
+  syncWatching();
 }

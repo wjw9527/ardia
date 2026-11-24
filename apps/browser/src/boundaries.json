@@ -1084,16 +1084,17 @@
   {
    "id": "plugin-method:state.intent",
    "source": "plugin",
-   "guard": "parseIntent: an allowlist of tab and group intents, each in permissions.state.intents; own-key fields only, ids of eligible tabs, groups and normal windows only, no profiles, URLs or names; applied through applyMethod with the grant re-checked per op",
+   "guard": "parseIntent: an allowlist of tab and group intents, each in permissions.state.intents; own-key fields only, ids of eligible tabs, groups and normal windows only, no profiles, URLs or names; intentProblem refuses a move or group that would change a tab's profile or pin state and an unmute of a site muted in settings, checked before the op and again as it runs; mute and unmute touch the tabs only",
    "checks": [
     "apps/browser/src/state/plugins/channelApi.ts#case \"state.intent\"",
-    "apps/browser/src/state/plugins/stateIntents.ts#parseIntent"
+    "apps/browser/src/state/plugins/stateIntents.ts#parseIntent",
+    "apps/browser/src/state/plugins/stateIntentGuards.ts#intentProblem"
    ]
   },
   {
    "id": "plugin-method:state.subscribe",
    "source": "plugin",
-   "guard": "Topics in permissions.state.events only, refused whole otherwise; every event is projected through pluginEventRedaction after the commit, coalesced, with no private window, incognito tab, private download, file, internal or credentialed address",
+   "guard": "Topics in permissions.state.events only, refused whole otherwise; resync only as a boolean; every event is projected through pluginEventRedaction after the commit, coalesced and packed by UTF-8 bytes, with no private window, incognito tab, private download, file, internal or credentialed address and no query whose decoded name looks secret or that doesn't decode",
    "checks": [
     "apps/browser/src/state/plugins/channelApi.ts#case \"state.subscribe\"",
     "apps/browser/src/state/plugins/stateEvents.ts#subscribeState",

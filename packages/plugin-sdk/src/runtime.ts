@@ -266,6 +266,7 @@ export function createHostRuntime(transport: Transport, options: HostRuntimeOpti
       });
     }
     if (typeof record.event === "string") {
+      subscriptions.noteDropped(record.dropped);
       const data = (typeof record.data === "object" && record.data !== null ? record.data : {}) as Record<string, unknown>;
       const time = typeof record.time === "number" ? record.time : undefined;
       if (record.event === "plugin.values") return deliverEvent(record.event, data, time);
