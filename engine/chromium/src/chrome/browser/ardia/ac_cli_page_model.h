@@ -31,6 +31,7 @@ struct AxItem {
   std::string name;
   std::string value;
   gfx::RectF box;
+  gfx::RectF visible;
   bool offscreen = false;
   bool hidden = false;
   bool interactive = false;

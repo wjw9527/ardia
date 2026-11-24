@@ -148,17 +148,17 @@ int PageModel::ChildFrameOfHost(int host) const {
 }
 
 bool PageModel::InViewport(int item) const {
-  const gfx::RectF& box = items[item].box;
-  if (box.IsEmpty()) {
+  const AxItem& data = items[item];
+  if (data.offscreen || data.box.IsEmpty()) {
     return false;
   }
-  gfx::RectF visible = box;
+  gfx::RectF visible = data.visible;
   visible.Intersect(gfx::RectF(viewport));
-  return !visible.IsEmpty();
+  return visible.width() >= 1 && visible.height() >= 1;
 }
 
 gfx::PointF PageModel::ClickPoint(int item) const {
-  gfx::RectF visible = items[item].box;
+  gfx::RectF visible = items[item].visible;
   visible.Intersect(gfx::RectF(viewport));
   if (visible.IsEmpty()) {
     visible = items[item].box;
@@ -253,10 +253,14 @@ std::optional<PageModel> BuildPageModel(ui::AXTreeUpdate& update,
         data.GetStringAttribute(ax::mojom::StringAttribute::kValue),
         kMaxNameBytes);
     bool offscreen = false;
-    gfx::RectF bounds =
+    gfx::RectF visible =
         tree.RelativeToTreeBounds(node, gfx::RectF(), &offscreen, true);
+    gfx::RectF bounds =
+        tree.RelativeToTreeBounds(node, gfx::RectF(), nullptr, false);
+    visible.Scale(static_cast<float>(1.0 / model.scale));
     bounds.Scale(static_cast<float>(1.0 / model.scale));
     item.box = bounds;
+    item.visible = visible;
     item.offscreen = offscreen;
     item.hidden = node->IsInvisibleOrIgnored();
     item.disabled = data.GetRestriction() == ax::mojom::Restriction::kDisabled;
@@ -309,7 +313,7 @@ std::optional<PageModel> BuildPageModel(ui::AXTreeUpdate& update,
   model.viewport = model.items[0].box.size();
   for (size_t i = 0; i < model.items.size(); ++i) {
     const AxItem& item = model.items[i];
-    if (item.modal && !item.hidden && !item.box.IsEmpty()) {
+    if (item.modal && !item.hidden && !item.visible.IsEmpty()) {
       model.modal = static_cast<int>(i);
     }
   }

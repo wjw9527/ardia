@@ -810,11 +810,13 @@ real-user metrics of the traced page's origin, read from the tab after the trace
 query. When the trace has no page load to tie it to (record with `reload`), or the page changed origin during the trace, `fieldData` is `{skipped}` instead. Nothing is sent without it,
 and never for a private window's page.
 
-**Engine.** The tab-reading methods need an event-capable inspection session from the engine (#3993); until it lands
-they answer `failed` with "This Ardia can't open a DevTools inspection session on a tab yet." The analysers
-(`perfInsight`, `issues` given `issues`, `stackTrace`, `causeChainFunction`) work now. Ardia's app makes no request
-for a source map: React Native's `fetch` follows redirects and buffers whole bodies, so it can't enforce the limits
-such a fetch needs.
+**Engine.** The tab-reading methods run on the engine's event-capable sessions (`engine.cliDevToolsOpen` with
+`scope: "inspect"`, `ac_cli_devtools_sessions.cc`, #4055): a separate DevTools client per session that never shares or
+resets another client's overrides, sends only the same `INSPECTION_METHODS` list again in the engine (an inspect session
+refuses anything else and any child `sessionId`), and pushes the tab's events back (`engine.cliDevTools`; trace chunks up
+to 16 MiB). On Windows, whose engine has no such session yet, they answer `failed` with "This Ardia can't open a DevTools
+inspection session on a tab yet." Ardia's app makes no request for a source map: React Native's `fetch` follows
+redirects and buffers whole bodies, so it can't enforce the limits such a fetch needs.
 
 **Why not the DevTools frontend's own trace engine.** `third_party/devtools-frontend`'s `models/trace` handlers and
 insights depend on its `core/i18n`, `core/platform` and `lantern` modules. Bundling them into the app's Hermes bundle
@@ -827,6 +829,43 @@ into a separate bundle that is loaded only when a `devtools.*` method first runs
 `cli_devtools_field_data_requests`, `cli_devtools_issues_reported`, `cli_devtools_source_maps_resolved`,
 `cli_devtools_source_maps_failed`, `cli_devtools_style_lookups`, `cli_devtools_logpoints_set`,
 `cli_devtools_logpoints_refused`.
+
+## Driving a tab from the engine
+
+macOS and Linux (`drivesTabsFromEngine`; #4055). The engine answers these itself, in the browser process
+(`//chrome/browser/ardia` `ac_cli_*.cc`, shared by both platforms), so `ardia browse` can drive a running Ardia over this
+socket with no `--remote-debugging-port` and no token connection, and with no approval prompt per tab: the socket already
+checked the peer (same user, and on macOS who the program is), which is the same trust `control.devtoolsEndpoint` hands
+the token on. Plugin sessions can't call any of them.
+
+| Method | What it does |
+| --- | --- |
+| `devtools.attach {tab}` | Opens a DevTools session on a tab for this connection: a full DevTools client of that tab, as the token connection is (local files included, for uploads and downloads), within the `RemoteDebuggingAllowed` policy and Chrome's DevTools availability policy. Events arrive on this connection as `devtools.event {session, method, params, sessionId?}`, with no `subscribe` needed; one over 900 KiB comes as `{cut: true, bytes}` so the line fits. `devtools.detached {session, reason}` says it ended (`tab-closed`, `target-closed`, `control-off`). A tab that isn't on screen keeps drawing while its session is open (a capturer count, as for the token connection's sessions). At most 8 per connection, 32 in all |
+| `devtools.send {session, method, params?, sessionId?, timeoutMs?}` | One command and its result. `Target.setAutoAttach {flatten: true}` gives child sessions (cross-site iframes, workers) whose `sessionId` you pass back. `Page.captureScreenshot` on a tab that isn't on screen is answered from the offscreen surface (`offscreen: true`), as `tabs.screenshot` does |
+| `devtools.batch {session, commands, stopOnError?}` | Up to 64 commands in order, every result in order; stops at the first error unless `stopOnError: false` |
+| `devtools.detach {session}`, `devtools.sessions` | Ends one; lists this connection's |
+| `tabs.snapshot {tab, maxRefs?, maxTextBytes?, interactiveOnly?, wholePage?, occlusion?}` | The page as a compact list read from Chromium's accessibility tree across every frame, built in the browser process from `WebContents::RequestAXTreeSnapshot` (cross-site iframes in their own process and closed shadow roots included, since the accessibility tree is the flat tree). Each row: `ref` (`e12`), `role`, `name`, `value`, `box` (CSS pixels from the viewport's top left), `depth`, `frame`, states (`disabled`, `checked`, `expanded`, `focused`, `offscreen`), and for interactive rows `fp` (a hash of role and name) and `node` (the DOM node id, DevTools' `backendNodeId`). With a modal dialog open only the topmost is listed (`scope: "modal"`, `modal: {ref, name}`) unless `wholePage`. Up to 40 interactive rows in view are hit-tested, and one covered by something else says `occludedBy` with the covering layer's ref (`blocker: true` on that row). Budgets: 400 rows and 64 KiB of text by default, names cut to 200 bytes |
+| `tabs.waitSettled {tab, timeoutMs?, quietMs?, longRequestMs?, maxInflight?, idle?, frame?}` | A barrier: no navigation in flight (Chromium's own `NavigationHandle`s), the page done loading, no request started since the wait began still running for `quietMs` (requests over `longRequestMs` and event streams don't hold it; cross-site iframes counted through flattened child sessions), then the main thread idle (`requestIdleCallback` in an isolated world, at most 2 s) and the next frame committed (`InsertVisualStateCallback`, at most 1 s). A navigation during the last two starts it over. Past `timeoutMs` (default 10 s, at most 60 s) it answers `settled: false` with `waitingOn`; it ends early with an error if the tab closes or this connection does |
+| `tabs.hitTest {tab, ref \| x, y}` | What a click there would reach, across frames: `DOM.getNodeForLocation` in the main frame, then inside the cross-site iframe at the point in that iframe's own session. When the element is covered, `blocked: true`, `blocker` is the covering layer (the topmost ancestor of what's hit that doesn't hold the target) with its box, and `dismiss` is the button inside it most likely to close it (close, then reject, then accept, by a fixed word list), with up to 4 `choices` |
+| `tabs.click {tab, ref \| x, y, force?, button?, clickCount?, modifiers?}` | Scrolls the element into view (and waits for a smooth scroll to stop), runs the same hit test, and clicks with trusted mouse input (`Input.dispatchMouseEvent`, so `isTrusted` is true and the browser routes it into iframes). When something covers the target it answers `clicked: false` with `blocker` and `dismiss` instead, unless `force` |
+| `tabs.screenshot {tab, format?, quality?, clip?, scale?}` | Copies the tab's compositor surface (`CopyFromSurface`) after asking the page for a fresh frame, holding a capturer count so a tab that isn't on screen, in a minimized or covered window, on another Space or behind a locked screen still draws. JPEG 80 unless `png`; at most 8192 pixels a side |
+
+**Refs.** A ref stays the same for the same element (the frame and its DOM node id) across snapshots. When a ref's
+element is gone (the page re-rendered it), using it finds the element again by role and name, nearest the old box, and
+says `rebound: true`; when no element matches it fails with "ref e12 is stale". A navigation of the page or of the
+frame clears node ids, so refs from before it rebind by role and name. The ids of elements in iframes come from the
+combined accessibility tree (`chromium-ax-snapshot-dom-ids.patch` keeps each node's DOM id when Chromium joins the
+frames' trees).
+
+**Lifetime.** Every session and running operation belongs to its connection's owner key; when the connection closes the
+app calls `engine.cliCancel {owner}` and the engine ends them; turning control off ends every session
+(`ac_cli_control {on: false}`).
+
+**Telemetry** (counts only, from `ac_cli_control`'s status, `engineCli`): `cli_engine_sessions_opened`,
+`_sessions_refused`, `_session_commands`, `_session_events`, `_session_events_cut`, `_snapshots`, `_snapshots_failed`,
+`_snapshot_refs`, `_snapshots_modal`, `_occluded_refs`, `_settles`, `_settles_timed_out`, `_settle_ms`, `_hit_tests`,
+`_clicks`, `_clicks_blocked`, `_dismiss_found`, `_refs_rebound`, `_refs_stale`, `_screenshots`, `_screenshots_hidden`,
+`_screenshots_failed`, `_cancelled`.
 
 ## Next
 

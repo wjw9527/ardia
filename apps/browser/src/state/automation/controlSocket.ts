@@ -44,7 +44,8 @@ import { dismissSocketAsks } from "./socketAsk";
 import { dropAllHistoryHandles, dropHistoryHandles } from "./historyHandles";
 import { dropLateResults, forgetTabCalls } from "./tabCalls";
 import { dropAllLogpoints, dropLogpoints } from "./devToolsLogpoints";
-import { closeAllInspections, closeInspectionsFor } from "./devToolsSession";
+import { closeAllInspections, closeInspectionsFor, setInspectionTransport } from "./devToolsSession";
+import { closeAllEngineCli, closeEngineCliFor, engineInspectionOpener, startEngineCli } from "./engineCli";
 import { backgroundInstance } from "../app/appSettings";
 import { programControlOn } from "../app/programControlSetting";
 import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
@@ -295,6 +296,7 @@ function handleClose({ connection }: { connection: number }) {
   dropHistoryHandles(connection);
   dropLateResults(connection);
   void closeInspectionsFor(connection);
+  if (PLATFORM_FEATURES.drivesTabsFromEngine) closeEngineCliFor(connection);
   void dropLogpoints(connection);
   if (subscriptions.delete(connection)) refreshFeed();
 }
@@ -313,6 +315,12 @@ function listen() {
   onControlClose(handleClose);
   onControlWritten(({ tickets }) => runWritten(tickets));
   if (PLATFORM_FEATURES.controlDoorbell) startPeerDoorbell();
+  if (PLATFORM_FEATURES.drivesTabsFromEngine) {
+    startEngineCli((connection, name, data) => {
+      if (openConnections.has(connection)) broadcastOnControlSocket([connection], fittedEvent(name, Date.now(), data, consentToken()));
+    });
+    setInspectionTransport(engineInspectionOpener);
+  }
 }
 
 async function start(consent: ConsentToken | null) {
@@ -333,6 +341,7 @@ async function stop() {
   forgetTabCalls();
   releaseAllCliHolds();
   void closeAllInspections();
+  closeAllEngineCli();
   void dropAllLogpoints();
   noteSocketServing(false);
   void capturePageMenus(false).catch(() => undefined);
@@ -359,6 +368,7 @@ function sync() {
     forgetTabCalls();
     releaseAllCliHolds();
     void closeAllInspections();
+    closeAllEngineCli();
     void dropAllLogpoints();
     noteSocketServing(false);
     void capturePageMenus(false).catch(() => undefined);
