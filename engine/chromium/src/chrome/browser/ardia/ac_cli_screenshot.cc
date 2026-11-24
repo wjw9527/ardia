@@ -61,8 +61,7 @@ const char* CopyErrorName(content::CopyFromSurfaceError error) {
 
 std::optional<std::string> Encode(SkBitmap bitmap, bool png, int quality) {
   std::optional<std::vector<uint8_t>> bytes =
-      png ? gfx::PNGCodec::FastEncodeBGRASkBitmap(bitmap,
-                                                  /*discard_transparency=*/true)
+      png ? gfx::PNGCodec::FastEncodeBGRASkBitmap(bitmap, true)
           : gfx::JPEGCodec::Encode(bitmap, quality);
   if (!bytes) {
     return std::nullopt;
@@ -103,9 +102,7 @@ class ScreenshotJob : public content::WebContentsObserver {
     if (hidden_) {
       ++CliCounts().screenshots_hidden;
     }
-    capture_ = contents->IncrementCapturerCount(
-        gfx::Size(), /*stay_hidden=*/true, /*stay_awake=*/false,
-        /*is_activity=*/false);
+    capture_ = contents->IncrementCapturerCount(gfx::Size(), true, false, false);
     RequestFrame();
   }
 

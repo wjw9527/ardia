@@ -240,7 +240,6 @@ export const engine = defineDomain({
       payload: "CliDevToolsEvent",
       topic: "cliDevTools",
       desktop: "custom",
-      windows: "absent",
     },
     hoverLost: {
       payload: "HoverLostEpisode",

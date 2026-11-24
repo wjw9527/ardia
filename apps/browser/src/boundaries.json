@@ -1926,7 +1926,7 @@
    "guard": "tabs.snapshot, waitSettled, hitTest, click and screenshot take the tab through tabOf, a ref only as e<digits>, a point only as finite numbers within 100000 CSS pixels (never with a ref), and limits within the schema's ranges; the engine reads them again (ReadTarget, ReadOwner, ScreenshotOptionsFromArgs), refuses private tabs and tabs DevTools policy keeps from inspection, caps each operation at 15 s (settle at the caller's timeout, at most 60 s), and calls it off when its connection closes (RegisterCliOp, CancelCliOps). A click goes through the same hit test and is held back while something covers the target unless force",
    "checks": [
     "apps/browser/src/state/automation/socketEngineCli.ts#target",
-    "engine/chromium/src/chrome/browser/ardia/ac_cli_tab_ops.cc#ReadTarget",
+    "engine/chromium/src/chrome/browser/ardia/ac_cli_tab_ops_calls.cc#ReadTarget",
     "engine/chromium/src/chrome/browser/ardia/ac_cli_tab_ops.cc#kOpDeadline",
     "engine/chromium/src/chrome/browser/ardia/ac_cli_settle.cc#read_ms",
     "engine/chromium/src/chrome/browser/ardia/ac_cli_screenshot.cc#ScreenshotOptionsFromArgs",

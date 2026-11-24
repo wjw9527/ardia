@@ -19,6 +19,7 @@ export const controlDevToolsOpen = (tabId: string, owner: string, scope: Control
 export const controlDevToolsSend = (send: { session: number; owner: string; method: string; params?: Record<string, unknown>; sessionId?: string; timeoutMs?: number }) =>
   call("engine.cliDevToolsSend", defined(send));
 export const controlDevToolsClose = (session: number, owner: string) => call("engine.cliDevToolsClose", { session, owner });
+export type ControlDevToolsEvent = CliDevToolsEvent;
 export const onControlDevTools = (listener: (event: CliDevToolsEvent) => void) => on("engine.cliDevTools", listener);
 export const controlCancel = (owner: string) => call("engine.cliCancel", { owner });
 export const controlSnapshot = (tabId: string, read: { owner?: string; maxRefs?: number; maxTextBytes?: number; interactiveOnly?: boolean; wholePage?: boolean; occlusion?: boolean }) =>

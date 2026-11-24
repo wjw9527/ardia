@@ -118,8 +118,7 @@ class CliSession : public content::WebContentsObserver {
         },
         id_));
     drawing_ = contents->IncrementCapturerCount(
-        gfx::Size(), /*stay_hidden=*/!full_, /*stay_awake=*/false,
-        /*is_activity=*/false);
+        gfx::Size(), !full_, false, false);
   }
 
   ~CliSession() override = default;

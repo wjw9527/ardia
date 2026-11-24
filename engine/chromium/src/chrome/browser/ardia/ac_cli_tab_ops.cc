@@ -20,6 +20,7 @@
 #include "chrome/browser/ardia/ac_cli_cdp.h"
 #include "chrome/browser/ardia/ac_cli_ops.h"
 #include "chrome/browser/ardia/ac_cli_page_model.h"
+#include "chrome/browser/ardia/ac_cli_tab_ops.h"
 #include "chrome/browser/ardia/ac_engine.h"
 #include "chrome/browser/devtools/devtools_availability_checker.h"
 #include "chrome/browser/profiles/profile.h"
@@ -35,7 +36,8 @@
 namespace ardia {
 namespace {
 
-enum class Kind { kSnapshot, kHitTest, kClick };
+using Kind = TabOpKind;
+using OpArgs = TabOpArgs;
 
 constexpr base::TimeDelta kOpDeadline = base::Seconds(15);
 constexpr base::TimeDelta kTreeTimeout = base::Seconds(3);
@@ -43,25 +45,9 @@ constexpr size_t kTreeMaxNodes = 20000;
 constexpr size_t kMaxOcclusionChecks = 40;
 constexpr int kMaxHitDepth = 4;
 constexpr int kMaxScrollTries = 4;
-constexpr size_t kDismissChoices = 4;
 
 using Outcome = base::expected<base::DictValue, std::string>;
 
-struct OpArgs {
-  Kind kind = Kind::kSnapshot;
-  std::string owner;
-  size_t max_refs = 400;
-  size_t max_text = 64 * 1024;
-  bool interactive_only = false;
-  bool whole_page = false;
-  bool occlusion = true;
-  std::string ref;
-  std::optional<gfx::PointF> point;
-  bool force = false;
-  std::string button = "left";
-  int click_count = 1;
-  int modifiers = 0;
-};
 
 class TabOp : public content::WebContentsObserver {
  public:
@@ -468,65 +454,24 @@ class TabOp : public content::WebContentsObserver {
         base::Milliseconds(120));
   }
 
-  base::DictValue Described(int item) {
+  void TargetHit(int hit) {
     RefStore::CreateForWebContents(web_contents());
     RefStore* refs = RefStore::FromWebContents(web_contents());
-    const AxItem& data = model_->items[item];
-    base::DictValue out;
-    out.Set("ref", refs->RefFor(*model_, item));
-    out.Set("role", data.role);
-    out.Set("name", data.name);
-    out.Set("box", BoxValue(data.box));
-    if (data.frame > 0) {
-      out.Set("frame", data.frame);
-    }
-    return out;
-  }
-
-  void TargetHit(int hit) {
     base::DictValue out;
     out.Set("point", base::ListValue()
                          .Append(std::round(point_.x() * 10) / 10)
                          .Append(std::round(point_.y() * 10) / 10));
     out.Set("verified", hit >= 0);
     if (hit >= 0) {
-      out.Set("hit", Described(hit));
+      out.Set("hit", DescribeItem(*model_, refs, hit));
     }
     if (target_ >= 0) {
-      out.Set("target", Described(target_));
+      out.Set("target", DescribeItem(*model_, refs, target_));
       if (rebound_) {
         out.Set("rebound", true);
       }
     }
-    int blocker = -1;
-    if (target_ >= 0) {
-      blocker = BlockerOf(*model_, hit, target_);
-    } else if (hit >= 0 && model_->modal >= 0 &&
-               !model_->IsAncestor(model_->modal, hit)) {
-      blocker = model_->modal;
-    }
-    out.Set("blocked", blocker >= 0);
-    if (blocker >= 0) {
-      base::DictValue layer = Described(blocker);
-      out.Set("blocker", std::move(layer));
-      std::vector<DismissChoice> choices =
-          DismissChoices(*model_, blocker, kDismissChoices);
-      if (choices.empty() && model_->modal >= 0 && blocker != model_->modal &&
-          model_->IsAncestor(model_->modal, hit)) {
-        choices = DismissChoices(*model_, model_->modal, kDismissChoices);
-      }
-      base::ListValue listed;
-      for (const DismissChoice& choice : choices) {
-        base::DictValue described = Described(choice.item);
-        described.Set("kind", choice.kind);
-        listed.Append(std::move(described));
-      }
-      if (!choices.empty()) {
-        ++CliCounts().dismiss_found;
-        out.Set("dismiss", listed.front().Clone());
-      }
-      out.Set("choices", std::move(listed));
-    }
+    const int blocker = ReportBlocker(*model_, refs, hit, target_, &out);
     if (args_.kind == Kind::kHitTest) {
       return Finish(std::move(out));
     }
@@ -538,7 +483,6 @@ class TabOp : public content::WebContentsObserver {
     result_ = std::move(out);
     Press("mouseMoved");
   }
-
   void Press(const std::string& type) {
     base::DictValue params;
     params.Set("type", type);
@@ -576,126 +520,17 @@ class TabOp : public content::WebContentsObserver {
 
   void FinishSnapshot() {
     RefStore::CreateForWebContents(web_contents());
-    RefStore* refs = RefStore::FromWebContents(web_contents());
-    const PageModel& model = *model_;
-    const int scope = ScopeRoot();
-    base::ListValue listed;
-    std::set<int> blockers;
-    for (const auto& [item, blocker] : occluded_by_) {
-      blockers.insert(blocker);
-    }
-    size_t bytes = 0;
-    bool truncated = false;
-    int interactive = 0;
-    const int base_depth = model.items[scope].depth;
-    for (size_t i = 0; i < model.items.size(); ++i) {
-      const int index = static_cast<int>(i);
-      const AxItem& item = model.items[i];
-      if (item.hidden || !model.IsAncestor(scope, index)) {
-        continue;
-      }
-      if (item.interactive) {
-        ++interactive;
-      }
-      const bool blocker = blockers.contains(index);
-      bool include = item.interactive || blocker;
-      if (!include && !args_.interactive_only) {
-        include = item.structural || item.frame_host ||
-                  (item.text && !(item.parent >= 0 &&
-                                  (model.items[item.parent].interactive ||
-                                   model.items[item.parent].role ==
-                                       "heading") &&
-                                  model.items[item.parent].name == item.name));
-      }
-      if (!include) {
-        continue;
-      }
-      if (listed.size() >= args_.max_refs || bytes >= args_.max_text) {
-        truncated = true;
-        break;
-      }
-      base::DictValue row;
-      row.Set("ref", refs->RefFor(model, index));
-      row.Set("role", item.text ? std::string("text") : item.role);
-      if (!item.name.empty()) {
-        row.Set("name", item.name);
-      }
-      if (!item.value.empty() && item.value != item.name) {
-        row.Set("value", item.value);
-      }
-      row.Set("box", BoxValue(item.box));
-      row.Set("depth", item.depth - base_depth);
-      if (item.frame > 0) {
-        row.Set("frame", item.frame);
-      }
-      if (item.disabled) {
-        row.Set("disabled", true);
-      }
-      if (item.checked >= 0) {
-        if (item.checked == 2) {
-          row.Set("checked", "mixed");
-        } else {
-          row.Set("checked", item.checked == 1);
-        }
-      }
-      if (item.expanded >= 0) {
-        row.Set("expanded", item.expanded == 1);
-      }
-      if (item.focused) {
-        row.Set("focused", true);
-      }
-      if (!model.InViewport(index)) {
-        row.Set("offscreen", true);
-      }
-      if (item.interactive) {
-        row.Set("fp", Fingerprint(item));
-        if (item.dom > 0) {
-          row.Set("node", item.dom);
-        }
-      }
-      auto occluded = occluded_by_.find(index);
-      if (occluded != occluded_by_.end()) {
-        row.Set("occludedBy", refs->RefFor(model, occluded->second));
-      }
-      if (blocker) {
-        row.Set("blocker", true);
-      }
-      bytes += item.name.size() + item.value.size() + 48;
-      listed.Append(std::move(row));
-    }
-    CliCounts().snapshot_refs += listed.size();
-    base::DictValue out;
-    out.Set("generation", refs->generation());
-    out.Set("viewport", base::ListValue()
-                            .Append(std::round(model.viewport.width()))
-                            .Append(std::round(model.viewport.height())));
-    out.Set("scope", scope == 0 ? "page" : "modal");
-    if (scope != 0) {
-      ++CliCounts().snapshots_modal;
-      base::DictValue modal;
-      modal.Set("ref", refs->RefFor(model, scope));
-      modal.Set("name", model.items[scope].name);
-      out.Set("modal", std::move(modal));
-    }
-    if (model.focus >= 0 && !model.items[model.focus].hidden) {
-      out.Set("focused", refs->RefFor(model, model.focus));
-    }
-    out.Set("refs", std::move(listed));
-    out.Set("truncated", truncated);
-    out.Set("counts", base::DictValue()
-                          .Set("nodes", static_cast<int>(model.items.size()))
-                          .Set("frames", static_cast<int>(model.frames.size()))
-                          .Set("interactive", interactive)
-                          .Set("occluded",
-                               static_cast<int>(occluded_by_.size())));
-    if (occlusion_unavailable_) {
-      out.Set("occlusion", "unavailable");
-    } else if (args_.occlusion) {
-      out.Set("occlusion", static_cast<int>(checks_.size()));
-    }
-    Finish(std::move(out));
+    SnapshotRender render;
+    render.scope = ScopeRoot();
+    render.max_refs = args_.max_refs;
+    render.max_text = args_.max_text;
+    render.interactive_only = args_.interactive_only;
+    render.occlusion = args_.occlusion;
+    render.occlusion_unavailable = occlusion_unavailable_;
+    render.checks = checks_.size();
+    Finish(RenderSnapshot(*model_, RefStore::FromWebContents(web_contents()),
+                          occluded_by_, render));
   }
-
   void Fail(const std::string& why) {
     if (args_.kind == Kind::kSnapshot) {
       ++CliCounts().snapshots_failed;
@@ -745,129 +580,10 @@ class TabOp : public content::WebContentsObserver {
   base::WeakPtrFactory<TabOp> weak_factory_{this};
 };
 
-content::WebContents* TabFrom(const base::DictValue& args) {
-  std::optional<int> tab = args.FindInt("tab");
-  content::WebContents* contents = tab ? TabWithId(*tab) : nullptr;
-  return contents && !contents->IsBeingDestroyed() ? contents : nullptr;
 }
 
-bool ReadOwner(const ArgsCall& call, OpArgs* args, std::string* error) {
-  args->owner = call.String("owner");
-  if (!args->owner.empty() && !ValidCliOwner(args->owner)) {
-    *error = "bad owner";
-    return false;
-  }
-  return true;
+void StartTabOp(content::WebContents* contents, TabOpArgs args, Reply out) {
+  TabOp::Start(contents, std::move(args), std::move(out));
 }
 
-bool ReadTarget(const ArgsCall& call, OpArgs* args, std::string* error) {
-  args->ref = call.String("ref");
-  if (args->ref.size() > 32) {
-    *error = "bad ref";
-    return false;
-  }
-  const std::optional<double> x = call.args().FindDouble("x");
-  const std::optional<double> y = call.args().FindDouble("y");
-  if (x.has_value() != y.has_value()) {
-    *error = "give both x and y";
-    return false;
-  }
-  if (x) {
-    if (!std::isfinite(*x) || !std::isfinite(*y) || std::abs(*x) > 1e6 ||
-        std::abs(*y) > 1e6) {
-      *error = "that point is outside the page";
-      return false;
-    }
-    args->point = gfx::PointF(*x, *y);
-  }
-  if (args->ref.empty() == !args->point.has_value()) {
-    *error = "give a ref or a point (x, y), not both";
-    return false;
-  }
-  return true;
-}
-
-}
-}
-
-AC_ARGS_CALL(ac_cli_snapshot) {
-  ardia::Reply out = call.TakeReply();
-  content::WebContents* contents = ardia::TabFrom(call.args());
-  if (!contents) {
-    return out.Error("no such tab");
-  }
-  ardia::OpArgs args;
-  std::string error;
-  if (!ardia::ReadOwner(call, &args, &error)) {
-    return out.Error(error);
-  }
-  args.kind = ardia::Kind::kSnapshot;
-  if (std::optional<int> limit = call.args().FindInt("maxRefs")) {
-    if (*limit < 1 || *limit > 2000) {
-      return out.Error("maxRefs must be 1 to 2000");
-    }
-    args.max_refs = static_cast<size_t>(*limit);
-  }
-  if (std::optional<int> limit = call.args().FindInt("maxTextBytes")) {
-    if (*limit < 1024 || *limit > 512 * 1024) {
-      return out.Error("maxTextBytes must be 1024 to 524288");
-    }
-    args.max_text = static_cast<size_t>(*limit);
-  }
-  args.interactive_only = call.Bool("interactiveOnly");
-  args.whole_page = call.Bool("wholePage");
-  args.occlusion = call.Bool("occlusion", true);
-  ardia::TabOp::Start(contents, std::move(args), std::move(out));
-}
-
-AC_ARGS_CALL(ac_cli_hit_test) {
-  ardia::Reply out = call.TakeReply();
-  content::WebContents* contents = ardia::TabFrom(call.args());
-  if (!contents) {
-    return out.Error("no such tab");
-  }
-  ardia::OpArgs args;
-  std::string error;
-  if (!ardia::ReadOwner(call, &args, &error) ||
-      !ardia::ReadTarget(call, &args, &error)) {
-    return out.Error(error);
-  }
-  args.kind = ardia::Kind::kHitTest;
-  ardia::TabOp::Start(contents, std::move(args), std::move(out));
-}
-
-AC_ARGS_CALL(ac_cli_click) {
-  ardia::Reply out = call.TakeReply();
-  content::WebContents* contents = ardia::TabFrom(call.args());
-  if (!contents) {
-    return out.Error("no such tab");
-  }
-  ardia::OpArgs args;
-  std::string error;
-  if (!ardia::ReadOwner(call, &args, &error) ||
-      !ardia::ReadTarget(call, &args, &error)) {
-    return out.Error(error);
-  }
-  args.kind = ardia::Kind::kClick;
-  args.force = call.Bool("force");
-  const std::string button = call.String("button");
-  if (!button.empty()) {
-    if (button != "left" && button != "right" && button != "middle") {
-      return out.Error("button must be left, right or middle");
-    }
-    args.button = button;
-  }
-  if (std::optional<int> count = call.args().FindInt("clickCount")) {
-    if (*count < 1 || *count > 3) {
-      return out.Error("clickCount must be 1 to 3");
-    }
-    args.click_count = *count;
-  }
-  if (std::optional<int> modifiers = call.args().FindInt("modifiers")) {
-    if (*modifiers < 0 || *modifiers > 15) {
-      return out.Error("modifiers must be 0 to 15");
-    }
-    args.modifiers = *modifiers;
-  }
-  ardia::TabOp::Start(contents, std::move(args), std::move(out));
 }

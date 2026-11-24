@@ -43,9 +43,7 @@ NSSet<NSString *> *ForwardedTopics() {
 }
 
 NSString *AppEventOfTopic(NSString *topic) {
-  if ([topic isEqualToString:@"cliControl"]) return @"engine.cliControl";
-  if ([topic isEqualToString:@"cliDevTools"]) return @"engine.cliDevTools";
-  return topic;
+  return [topic isEqualToString:@"cliControl"] ? @"engine.cliControl" : [topic isEqualToString:@"cliDevTools"] ? @"engine.cliDevTools" : topic;
 }
 
 void *Symbol(const char *name) {

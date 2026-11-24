@@ -1,6 +1,5 @@
-import type { CliDevToolsEvent } from "@ardia/ardiacore";
 import { errorText } from "../../lib/errors";
-import { controlCancel, controlDevToolsClose, controlDevToolsOpen, controlDevToolsSend, onControlDevTools } from "../../platform/control";
+import { controlCancel, controlDevToolsClose, controlDevToolsOpen, controlDevToolsSend, onControlDevTools, type ControlDevToolsEvent } from "../../platform/control";
 import type { CdpEventListener, CdpParams, TransportOpener } from "./devToolsSession";
 import { OpError } from "./workspaceTargets";
 
@@ -19,7 +18,7 @@ const inspectOwner = () => `s${epoch}inspect`;
 
 export const engineFailure = (error: unknown) => (error instanceof OpError ? error : new OpError("failed", errorText(error)));
 
-function route(event: CliDevToolsEvent) {
+function route(event: ControlDevToolsEvent) {
   const session = event.session;
   if (typeof session !== "number") return;
   if (event.closed !== undefined) {
