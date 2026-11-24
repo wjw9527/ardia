@@ -1,0 +1,87 @@
+name: Custom macOS ARM64 - Sidebar spacing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: custom-macos-build
+  cancel-in-progress: false
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  TURBO_TELEMETRY_DISABLED: "1"
+  ARDIACORE_PREBUILT_REPO: ardia-browser/ardia
+  APPCAST_BASE: none
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 55cdee2f878d35398656a121e8818671da44610e
+          persist-credentials: false
+      - name: Verify runner
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch matching official Chromium framework
+        run: |
+          set -euo pipefail
+          engine="$(engine/engine-key.sh)"
+          framework="$(packages/ardiacore/scripts/fetch-engine.sh)"
+          printf 'ARDIACORE_FRAMEWORK=%s\nARDIACORE_FRAMEWORK_ENGINE=%s\n' "$framework" "$engine" >> "$GITHUB_ENV"
+      - name: Check TypeScript and edited tests
+        working-directory: apps/browser
+        run: |
+          pnpm typecheck
+          node --no-warnings --import ./src/test-loader.mjs --test src/lib/windowLayout.test.mjs src/state/settings/settings.test.mjs src/state/browser/windowSettingsWatch.test.mjs src/components/sidebar/rowHover.test.mjs src/components/window/dockMotion.test.mjs src/components/omnibox/barButtonsPress.test.mjs src/state/sync/cycleRepairs.test.mjs src/state/sync/adapters.test.mjs
+      - name: Install CocoaPods
+        working-directory: apps/browser/macos
+        run: pod install
+      - name: Build Release archive
+        run: scripts/release.sh 0.2.48 --rc --phase build
+        env:
+          RELEASE_BUILD_DIR: ${{ github.workspace }}/apps/browser/build-release-ci
+      - name: Package DMG
+        run: |
+          set -euo pipefail
+          app="dist/0.2.48-rc/Ardia.xcarchive/Products/Applications/Ardia.app"
+          test -d "$app"
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          test "$(lipo -archs "$app/Contents/MacOS/$executable")" = arm64
+          codesign --verify --deep --strict "$app"
+          stage="$RUNNER_TEMP/ardia-dmg"
+          mkdir -p "$stage" "$RUNNER_TEMP/ardia-output"
+          ditto "$app" "$stage/Ardia.app"
+          ln -s /Applications "$stage/Applications"
+          hdiutil create -volname Ardia -srcfolder "$stage" -format UDZO "$RUNNER_TEMP/ardia-output/Ardia-0.2.48-custom-arm64.dmg"
+          cp dist/0.2.48-rc/provenance.txt "$RUNNER_TEMP/ardia-output/"
+          cd "$RUNNER_TEMP/ardia-output"
+          shasum -a 256 Ardia-0.2.48-custom-arm64.dmg > Ardia-0.2.48-custom-arm64.dmg.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: Ardia-0.2.48-custom-arm64
+          path: ${{ runner.temp }}/ardia-output/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: macos-build-logs
+          path: dist/0.2.48-rc/*.log
+          if-no-files-found: ignore
+          retention-days: 14
