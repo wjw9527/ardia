@@ -76,17 +76,17 @@ class TabOp : public content::WebContentsObserver {
     Fail("the page's process went away");
   }
 
- private:
-  TabOp(content::WebContents* contents, OpArgs args, Reply out)
-      : content::WebContentsObserver(contents),
-        args_(std::move(args)),
-        out_(std::move(out)) {}
-
   ~TabOp() override {
     if (op_id_) {
       FinishCliOp(op_id_);
     }
   }
+
+ private:
+  TabOp(content::WebContents* contents, OpArgs args, Reply out)
+      : content::WebContentsObserver(contents),
+        args_(std::move(args)),
+        out_(std::move(out)) {}
 
   void Begin() {
     content::WebContents* contents = web_contents();

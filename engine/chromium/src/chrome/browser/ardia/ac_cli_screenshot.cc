@@ -80,6 +80,8 @@ class ScreenshotJob : public content::WebContentsObserver {
 
   void WebContentsDestroyed() override { Fail("the tab closed"); }
 
+  ~ScreenshotJob() override = default;
+
  private:
   ScreenshotJob(content::WebContents* contents,
                 ScreenshotOptions options,
@@ -88,8 +90,6 @@ class ScreenshotJob : public content::WebContentsObserver {
         options_(std::move(options)),
         done_(std::move(done)),
         runner_(base::SequencedTaskRunner::GetCurrentDefault()) {}
-
-  ~ScreenshotJob() override = default;
 
   void Begin() {
     ++CliCounts().screenshots;

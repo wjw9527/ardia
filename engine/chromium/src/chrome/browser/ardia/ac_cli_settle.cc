@@ -75,6 +75,12 @@ class SettleOp : public content::WebContentsObserver {
     Fail("the page's process went away");
   }
 
+  ~SettleOp() override {
+    if (op_id_) {
+      FinishCliOp(op_id_);
+    }
+  }
+
  private:
   enum class Phase { kQuiet, kIdle, kFrame };
 
@@ -82,12 +88,6 @@ class SettleOp : public content::WebContentsObserver {
       : content::WebContentsObserver(contents),
         args_(std::move(args)),
         out_(std::move(out)) {}
-
-  ~SettleOp() override {
-    if (op_id_) {
-      FinishCliOp(op_id_);
-    }
-  }
 
   void Begin() {
     ++CliCounts().settles;

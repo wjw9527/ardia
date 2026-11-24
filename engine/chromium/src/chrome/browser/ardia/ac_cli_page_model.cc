@@ -13,6 +13,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -318,8 +319,7 @@ std::optional<PageModel> BuildPageModel(ui::AXTreeUpdate& update,
 std::string Fingerprint(const AxItem& item) {
   const std::string key = base::StrCat({item.role, "\n", item.name});
   const uint32_t hash = base::PersistentHash(key);
-  return base::HexEncode(reinterpret_cast<const uint8_t*>(&hash),
-                         sizeof(hash));
+  return base::StringPrintf("%08x", hash);
 }
 
 int BlockerOf(const PageModel& model, int hit, int target) {
