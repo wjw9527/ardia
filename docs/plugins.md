@@ -588,6 +588,9 @@ slow, hung or gone can't slow them down: sends go to the helper's own buffered c
   same. A drop within 30 s of the last resync waits before resyncing, 1 s doubling up to 60 s. After 5 such drops in a
   row the SDK stops and reports a `state_desync` error, until the plugin subscribes to a topic again. Navigation
   commits lost to a drop don't come back.
+- **A second listener.** When a listener joins a topic another listener already hears, the SDK asks for that topic
+  whole again (`resync: ["tabs"]`), so every listener starts from an `initial` event; the ones already listening get it
+  too and should treat it as a reset.
 - Subscriptions end with the run.
 
 **Intents** (`state/plugins/stateIntents.ts`) are the only state a plugin may change this way, and each must be listed:
@@ -611,7 +614,8 @@ slow, hung or gone can't slow them down: sends go to the helper's own buffered c
   again just before it runs: a destination in another profile (an anchor, a group or a window showing another profile)
   is `refused`, so is a move that would put an unpinned tab among pins or a pinned one (a tile, a row or a member of a
   pinned group) anywhere else, and so is any move of a pinned tab to another window, whether by `window`, a `before`
-  or `after` tab or a group there. `tabs.group` takes only unpinned tabs of one
+  or `after` tab or a group there. Every tab, group and window an intent names is checked again just before it runs, and
+  one that is gone by then refuses the intent; a group id is never looked up as a group name. `tabs.group` takes only unpinned tabs of one
   window and profile. Use `tabs.pin` and `tabs.unpin` to change pins. Tabs in a split move with their split.
 - No profile, URL, group name lookup or `$N` reference is accepted, and no intent writes anything else: not
   `plugins.json`, consent or approvals, the Keychain or secrets, permissions, update pins, settings (muted sites
@@ -1054,7 +1058,7 @@ Requests from the helper (`{"id", "method", "params"}`):
 | `run` `{"command", "arg"?, "window"?, "tab"?}` | `commands` | as on the socket |
 | `open` `{"urls", "activate"?}` | `commands` | opens 1 to 10 `http:` or `https:` URLs as background tabs in the last focused window (`activate` selects the first there without raising the window). Each URL, at most 2048 characters, is parsed whole as http or https with a host, before anything opens: the host as written must be ASCII (a Unicode name is refused; send it in punycode, `xn--`), with no user name or password and a port from 1 to 65535; an IPv6 host is put in its short form, and dotted IPv4 must have four parts. Raw spaces (percent-encode them), backslashes and control characters are refused before parsing. What opens is the normalised address: scheme and host lower-cased, the default port dropped, non-ASCII in the path, query and fragment percent-encoded as UTF-8, everything else as given. Anything else (`file:`, a path, `ardia:` or `chrome:` pages, `about:`, `javascript:`, `data:`, `ardia-plugin:`) is `bad_request`, and the message names the first bad entry, as in `urls[1] isn't a valid address`. It runs only while the run that asked is still the plugin's current run and still has `commands`; one queued behind other work when that stops opens nothing. Answers `{"ok": true, "tabs": [ids]}`: the tabs it made, nothing else |
 | `apply` `{"ops"}` | `workspace`, or `tabs: write` for `open`, `tab.close` and `tab.activate` | as on the socket, except that every URL in `open` and `group.create` is read by `open`'s rules above (http or https only). A batch with any other address is `refused` whole before anything in it runs, and the message names the address |
-| `state.subscribe` `{"topics", "resync"?}` | each topic in `permissions.state.events` | `{"ok": true, "topics"}`, replacing the run's topics (`[]` ends them; `resync: true` sends them all whole again); then `{"event": "state.<topic>", "time", "data"}` lines ([State events and intents](#state-events-and-intents)). A topic it doesn't list refuses the whole request |
+| `state.subscribe` `{"topics", "resync"?}` | each topic in `permissions.state.events` | `{"ok": true, "topics"}`, replacing the run's topics (`[]` ends them; `resync: true` sends them all whole again, a list of topics just those); then `{"event": "state.<topic>", "time", "data"}` lines ([State events and intents](#state-events-and-intents)). A topic it doesn't list refuses the whole request |
 | `state.intent` `{"intent", "args"}` | the intent in `permissions.state.intents` | `{"ok": true, "group"?}`, once Ardia's own reducers made the change |
 | `page.post` `{"message", "view"?}` | a `page` | `{"ok": true}`, or `overloaded`: a message to the plugin's page views ([Pages and their helper](#pages-and-their-helper)); `refused` for a plugin with no page, however the method name is spelled in JSON |
 | `page.open` `{"path"?, "split"?, "side"?, "context"?}` | a `page`; `context` needs `tabs` | `{"tabId", "windowId"}`: opens the plugin's page at that path in the last focused window, as a tab or in Split View beside the current tab |

@@ -52,6 +52,7 @@ export type ApiState = {
   values: Record<string, unknown>;
   info: PluginInfo;
   subscriptionsChanged(): void;
+  topicJoined(topic: string): void;
   report(error: unknown): void;
 };
 
@@ -134,8 +135,10 @@ export function createArdia(rpc: Rpc, registry: Registry, state: ApiState) {
     subscribe<T extends StateTopic>(topic: T, listener: StateListener<StateEventMap[T]>): Disposable {
       let listeners = registry.state.get(topic);
       if (!listeners) registry.state.set(topic, (listeners = new Set()));
+      const joining = listeners.size > 0;
       const added = addTo(listeners, listener);
       state.subscriptionsChanged();
+      if (joining) state.topicJoined(topic);
       return {
         dispose() {
           added.dispose();

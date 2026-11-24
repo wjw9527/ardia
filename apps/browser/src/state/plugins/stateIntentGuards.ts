@@ -4,6 +4,8 @@ import { rootOf } from "../groups/groups";
 import type { TabPlacement } from "../pins/placing";
 import { isSiteMuted } from "../tabs/mute";
 import { withPanes } from "../automation/workspaceChecks";
+import { eligibleKind, isEligibleTab } from "../automation/automationWindows";
+import { isEligibleGroup } from "../automation/workspaceTree";
 import { destination, OpError, type Destination } from "../automation/workspaceTargets";
 import type { Op } from "../automation/workspaceOps";
 
@@ -85,7 +87,19 @@ function unmuteProblem(s: BrowserState, op: Op): GuardProblem | null {
   return null;
 }
 
+function goneTarget(s: BrowserState, op: Op): GuardProblem | null {
+  const group = op.group;
+  if (typeof group === "string" && !isEligibleGroup(s, group)) return refused(`There's no group ${group} this plugin may use any more.`);
+  const named = [...(Array.isArray(op.tabs) ? (op.tabs as string[]) : []), ...[op.tab, op.before, op.after].filter((id): id is string => typeof id === "string")];
+  const gone = named.find((id) => !isEligibleTab(s, id));
+  if (gone) return refused(`There's no tab ${gone} this plugin may use any more.`);
+  if (typeof op.window === "string" && eligibleKind(s, op.window) !== "normal") return refused(`There's no window ${op.window} this plugin may use any more.`);
+  return null;
+}
+
 export function intentProblem(s: BrowserState, intent: string, op: Op): GuardProblem | null {
+  const gone = goneTarget(s, op);
+  if (gone) return gone;
   if (intent === "tabs.move") return moveProblem(s, op);
   if (intent === "tabs.group") return groupProblem(s, op);
   if (intent === "tabs.unmute") return unmuteProblem(s, op);

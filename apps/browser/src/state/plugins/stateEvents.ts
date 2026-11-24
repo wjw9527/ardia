@@ -65,7 +65,10 @@ const SUBSCRIBE_KEYS = ["topics", "resync"];
 export function subscribeState(c: Caller, m: PluginManifest, params: Record<string, unknown>): Body {
   const unknown = Object.keys(params).filter((key) => !SUBSCRIBE_KEYS.includes(key));
   if (unknown.length) return failure("bad_request", `state.subscribe takes topics and resync, not ${unknown.slice(0, 4).map((k) => k.slice(0, 40)).join(", ")}.`);
-  if (params.resync !== undefined && typeof params.resync !== "boolean") return failure("bad_request", "resync is true or false.");
+  const askedResync = params.resync;
+  if (askedResync !== undefined && typeof askedResync !== "boolean" && !(Array.isArray(askedResync) && askedResync.length <= STATE_TOPICS.length && askedResync.every(isStateTopic))) {
+    return failure("bad_request", "resync is true, false or a list of the topics to send whole again.");
+  }
   const given = params.topics;
   if (!Array.isArray(given) || given.length > STATE_TOPICS.length * 2) return failure("bad_request", `state.subscribe needs topics: a list of ${STATE_TOPICS.join(", ")}.`);
   const bad = given.findIndex((t) => !isStateTopic(t));
@@ -84,10 +87,10 @@ export function subscribeState(c: Caller, m: PluginManifest, params: Record<stri
     return { result: { ok: true, topics: [] } };
   }
   const sub: Subscriber = existing ?? { name: c.name, run: c.run, topics, sent: new Map() };
-  const resync = params.resync === true;
-  if (resync && existing) notePlugin("plugin_state_resyncs", consentToken());
-  for (const topic of [...sub.sent.keys()]) if (!topics.has(topic) || resync) sub.sent.delete(topic);
-  const added = [...topics].filter((t) => resync || !existing || !sub.topics.has(t));
+  const resyncing = new Set<StateTopic>(askedResync === true ? topics : Array.isArray(askedResync) ? (askedResync as StateTopic[]).filter((t) => topics.has(t)) : []);
+  if (askedResync === true && existing) notePlugin("plugin_state_resyncs", consentToken());
+  for (const topic of [...sub.sent.keys()]) if (!topics.has(topic) || resyncing.has(topic)) sub.sent.delete(topic);
+  const added = [...topics].filter((t) => resyncing.has(t) || !existing || !sub.topics.has(t));
   sub.topics = topics;
   subscribers.set(key, sub);
   syncWatching();

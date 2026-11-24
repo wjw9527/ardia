@@ -224,8 +224,10 @@
       subscribe(topic, listener) {
         let listeners = registry.state.get(topic);
         if (!listeners) registry.state.set(topic, listeners = new Set());
+        const joining = listeners.size > 0;
         const added = addTo(listeners, listener);
         state.subscriptionsChanged();
+        if (joining) state.topicJoined(topic);
         return {
           dispose() {
             added.dispose();
@@ -933,6 +935,7 @@
     let queued = false;
     let inFlight = false;
     let resyncing = false;
+    let joined = new Set();
     let waiting = false;
     let streak = 0;
     let lastResyncAt = Number.NEGATIVE_INFINITY;
@@ -1027,7 +1030,23 @@
       waiting = true;
       later(streak === 0 ? 0 : Math.min(backoff * 2 ** (streak - 1), MAX_RESYNC_DELAY_MS), () => void resync());
     };
-    return { sync, deliverState, noteDropped };
+    const SNAPSHOT_TOPICS = new Set(["tabs", "workspace", "downloads"]);
+    async function sendJoined() {
+      const topics = [...joined].filter((t) => registry.state.has(t) && acknowledgedTopics.split(",").includes(t));
+      joined = new Set();
+      if (!live() || !topics.length) return;
+      try {
+        await rpc.request(HOST_METHODS.stateSubscribe, { topics: wantedTopics(), resync: topics });
+      } catch (error) {
+        report(error);
+      }
+    }
+    const topicJoined = (topic) => {
+      if (!SNAPSHOT_TOPICS.has(topic)) return;
+      if (!joined.size) enqueueMicrotask(() => void sendJoined());
+      joined.add(topic);
+    };
+    return { sync, deliverState, noteDropped, topicJoined };
   }
 
   var SDK_VERSION = "2.0.0";
@@ -1125,6 +1144,7 @@
       values: {},
       info: { name: "", app: "", version: "", protocol: 0 },
       subscriptionsChanged: () => subscriptions.sync(),
+      topicJoined: (topic) => subscriptions.topicJoined(topic),
       report
     };
     const ardia2 = createArdia(rpc, registry, state);

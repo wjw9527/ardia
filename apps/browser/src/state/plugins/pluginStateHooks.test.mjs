@@ -13,6 +13,7 @@ const { settledStops } = await import("./process.ts");
 const { flushStateEvents, stateSubscriberCount } = await import("./stateEvents.ts");
 const { packEvents, STATE_EVENT_BUDGET_BYTES, STATE_ROUND_BYTES } = await import("./stateEventPacking.ts");
 const wireBytes = (line) => new TextEncoder().encode(line).length + 1;
+const { HOSTILE_STRINGS } = await import("../../../../../scripts/security/hostile-inputs.mjs");
 const { notePluginStateCommit } = await import("./stateCommits.ts");
 const { consentLines } = await import("./consent.ts");
 const { redactedDownloads, pluginStateUrl } = await import("./pluginEventRedaction.ts");
@@ -616,6 +617,58 @@ test("tabs.move and tabs.group never change a tab's profile or whether it is pin
   assert.equal((await intent("tabs.move", { tabs: [b], before: a })).result.ok, true);
   assert.equal(S().tabs[b].pin, null);
   assert.equal(S().tabs[b].profileId, S().tabs[a].profileId);
+});
+
+test("resync can name just the topics to send whole again", async () => {
+  let w;
+  const run = await subscribed(WATCHER, ["tabs", "workspace"], () => (w = S().createWindow({ url: "https://a.example/" })));
+  host.events.length = 0;
+  assert.equal((await ask("watcher", "state.subscribe", { topics: ["tabs", "workspace"], resync: ["tabs"] }, run)).result.ok, true);
+  flushStateEvents();
+  assert.equal(stateEvents("watcher", "tabs")[0]?.initial, true);
+  assert.deepEqual(stateEvents("watcher", "workspace"), [], "only the named topic");
+  assert.equal((await ask("watcher", "state.subscribe", { topics: ["tabs"], resync: ["plugins"] }, run)).error.code, "bad_request");
+  assert.ok(w);
+});
+
+test("an intent whose group is gone by the time it runs is refused, never matched to another group by name", async () => {
+  await enable(ACTOR);
+  const w = S().createWindow({ url: "https://a.example/" });
+  const a = activeTabId(S(), w);
+  const b = S().newTab(w, { url: "https://b.example/" });
+  const run = await activated("actor");
+  const first = (await ask("actor", "state.intent", { intent: "tabs.group", args: { tabs: [a], name: "First" } }, run)).result.group;
+  const second = (await ask("actor", "state.intent", { intent: "tabs.group", args: { tabs: [b], name: first } }, run)).result.group;
+  assert.equal(S().groups[second].name, first, "a group named after the other's id");
+  S().ungroup(first);
+  assert.equal(S().groups[first], undefined);
+  const reply = await ask("actor", "state.intent", { intent: "groups.update", args: { group: first, name: "Renamed" } }, run);
+  assert.equal(reply.error?.code, "refused");
+  assert.equal(S().groups[second].name, first, "the other group kept its name");
+});
+
+test("hostile text in an intent never reaches the store as anything but plain text, and plain text still applies", async () => {
+  await enable(ACTOR);
+  const w = S().createWindow({ url: "https://a.example/" });
+  const a = activeTabId(S(), w);
+  const run = await activated("actor");
+  const group = (await ask("actor", "state.intent", { intent: "tabs.group", args: { tabs: [a], name: "Start" } }, run)).result.group;
+  const guarded = () => JSON.stringify([S().settings, S().profiles, P().records]);
+  const before = guarded();
+  const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/u;
+  for (const { value } of HOSTILE_STRINGS) {
+    for (const args of [{ group, name: value }, { group, icon: value }]) {
+      const reply = await ask("actor", "state.intent", { intent: "groups.update", args }, run);
+      const g = S().groups[group];
+      assert.ok(g, "the group survives");
+      assert.doesNotMatch(g.name, UNSAFE, JSON.stringify(value).slice(0, 80));
+      assert.ok(g.name.length <= 200);
+      if (reply.result) assert.ok(args.name === undefined || g.name === value.trim(), "what was accepted is what was stored");
+    }
+  }
+  assert.equal(guarded(), before, "no setting, profile or plugin record changed");
+  assert.equal((await ask("actor", "state.intent", { intent: "groups.update", args: { group, name: "Reading list" } }, run)).result.ok, true);
+  assert.equal(S().groups[group].name, "Reading list", "a plain name applies");
 });
 
 test("subscriptions end with the run", async () => {

@@ -935,6 +935,19 @@ describe("createHostRuntime", () => {
     assert.equal(resyncs(), 2, "outside the window, no backoff");
   });
 
+  test("a second listener on a subscribed topic gets a fresh snapshot through a topic-only resync", async () => {
+    const { host, runtime } = await started({});
+    runtime.ardia.tabs.onChange(() => {});
+    runtime.ardia.downloads.onChange(() => {});
+    await settle();
+    const before = host.calls("state.subscribe").length;
+    runtime.ardia.tabs.onChange(() => {});
+    runtime.ardia.navigation.onCommit(() => {});
+    await settle();
+    const after = host.calls("state.subscribe").slice(before).map((m) => m.params);
+    assert.deepEqual(after.filter((p) => p.resync), [{ topics: ["downloads", "navigation", "tabs"], resync: ["tabs"] }]);
+  });
+
   test("a drop with no state listeners asks for nothing", async () => {
     const { host } = await started({ events: { "tab.activated": () => {} } });
     await settle();

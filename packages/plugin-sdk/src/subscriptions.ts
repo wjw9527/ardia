@@ -18,6 +18,7 @@ export function createSubscriptionSync(rpc: Rpc, registry: Registry, report: (er
   let queued = false;
   let inFlight = false;
   let resyncing = false;
+  let joined = new Set<string>();
   let waiting = false;
   let streak = 0;
   let lastResyncAt = Number.NEGATIVE_INFINITY;
@@ -120,5 +121,24 @@ export function createSubscriptionSync(rpc: Rpc, registry: Registry, report: (er
     later(streak === 0 ? 0 : Math.min(backoff * 2 ** (streak - 1), MAX_RESYNC_DELAY_MS), () => void resync());
   };
 
-  return { sync, deliverState, noteDropped };
+  const SNAPSHOT_TOPICS = new Set(["tabs", "workspace", "downloads"]);
+
+  async function sendJoined() {
+    const topics = [...joined].filter((t) => registry.state.has(t) && acknowledgedTopics.split(",").includes(t));
+    joined = new Set();
+    if (!live() || !topics.length) return;
+    try {
+      await rpc.request(M.stateSubscribe, { topics: wantedTopics(), resync: topics });
+    } catch (error) {
+      report(error);
+    }
+  }
+
+  const topicJoined = (topic: string) => {
+    if (!SNAPSHOT_TOPICS.has(topic)) return;
+    if (!joined.size) enqueueMicrotask(() => void sendJoined());
+    joined.add(topic);
+  };
+
+  return { sync, deliverState, noteDropped, topicJoined };
 }
