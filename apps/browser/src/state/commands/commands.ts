@@ -98,7 +98,7 @@ export function runCommand({ command, arg, windowId: given }: CommandEvent, { st
     case "newWindow":
       return void openWindow({ profileId: arg ?? newWindowProfile(s, requested) });
     case "newBlankWindow":
-      return void openWindow({ profileId: newWindowProfile(s, requested), blank: true });
+      return void openWindow({ profileId: s.settings.defaultProfileId, blank: true });
     case "newIncognitoWindow":
       return void openWindow({ kind: "private", profileId: originalProfile(s, s.windows[requested ?? ""]) });
     case "newLittleArdia":

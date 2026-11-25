@@ -31,7 +31,7 @@ import { newTabHome } from "../tabs/newTabHome";
 import { noteAutoHideTabsChosen, noteTornOffWindowKeptAutoHide } from "../telemetry/autoHideTabsChoices";
 import { lastClosedEntry, lastClosedTab, restoreTab, restoreWindow, withoutRecentlyClosed } from "./reopenClosed";
 import { noteRecentlyClosedCleared } from "../telemetry/recentlyClosedCounts";
-import { groupTree, regrouped, splitsWithin, withSplitsBack } from "./groupMoves";
+import { groupTree, regrouped, splitsWithin, withMovedTabStructure, withSplitsBack } from "./groupMoves";
 import { commonGroup, orderSections } from "../groups/groups";
 import { groupOf } from "../pins/tabGrouping";
 import { focusedWindowOf } from "./ui";
@@ -123,7 +123,9 @@ export function moveTabsInto(s: BrowserState, ids: string[], targetId: string): 
     const recent = src.tabIds.map((t) => next.tabs[t]!).sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
     if (recent) next = apply(next, activated(next, src.activeTabIds[recent.profileId] ?? recent.id));
   }
-  return settleMovedPins(s, next, moving.map((t) => t.id), targetId);
+  const moved = moving.map((t) => t.id);
+  next = settleMovedPins(s, next, moved, targetId);
+  return isBlankWindow(target) || [...sources].some((id) => isBlankWindow(s.windows[id])) ? withMovedTabStructure(s, next, moved, targetId) : next;
 }
 
 function placeMovedTabs(s: BrowserState, windowId: string, ids: string[], joinable: Set<string>): BrowserState {
@@ -320,8 +322,9 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     const g = s.groups[groupId];
     const targetWindow = windowId ? s.windows[windowId] : undefined;
     if (!g || g.pinned || (isBlankWindow(targetWindow) && targetWindow?.profileId !== g.profileId)) return undefined;
-    const tree = groupTree(get().groups, groupId);
-    const kept = splitsWithin(get(), g.tabIds);
+    if (isBlankWindow(s.windows[g.windowId]) || isBlankWindow(targetWindow)) return get().moveTabsToWindow(g.tabIds, windowId, options);
+    const tree = groupTree(s.groups, groupId);
+    const kept = splitsWithin(s, g.tabIds);
     const target = get().moveTabsToWindow(g.tabIds, windowId, options);
     if (target) set(withSplitsBack(regrouped(get(), tree, target, g.profileId, false), kept, target));
     return target;

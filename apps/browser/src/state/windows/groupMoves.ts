@@ -63,3 +63,15 @@ export function withSplitsBack(s: BrowserState, kept: SplitView[], windowId: str
   }
   return splits === s.splits ? s : { ...s, splits };
 }
+
+export function withMovedTabStructure(before: BrowserState, after: BrowserState, tabIds: string[], windowId: string): BrowserState {
+  const moved = new Set(tabIds);
+  const complete = Object.values(before.groups).filter((g) => g.tabIds.length && g.tabIds.every((id) => moved.has(id)));
+  const completeIds = new Set(complete.map((g) => g.id));
+  let next = after;
+  for (const group of complete) {
+    if (group.parentId && completeIds.has(group.parentId)) continue;
+    next = regrouped(next, groupTree(before.groups, group.id), windowId, group.profileId, false);
+  }
+  return withSplitsBack(next, splitsWithin(before, tabIds), windowId);
+}

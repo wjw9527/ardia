@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
-import { ClipView, ContextMenuArea, space, WindowDragRegion } from "../ui";
+import { ClipView, ContextMenuArea, space, Text, WindowDragRegion } from "../ui";
 import { layout, useTheme } from "../ui/theme";
 import { useSidebarHighContrast } from "../../state/sidebar/textLook";
 import { TintInk } from "../ui/TintInk";
@@ -59,10 +59,17 @@ export function Sidebar({ width }: { width: number }) {
   const downloadsShown = useSidebarPart("downloads");
   const hasDownloads = useHasDownloads(windowId) && downloadsShown;
   const blank = useBrowser((s) => isBlankWindow(s.windows[windowId]));
+  const windowLabelBand = blank && (addressBar || collapsed) ? layout.rowHeight : 0;
+  const windowLabel = blank ? (
+    <Text accessibilityRole="header" lines={1} tone="textSecondary" weight="semibold">
+      This Window
+    </Text>
+  ) : null;
   const profileShown = useSidebarPart("profile") && !blank;
   const dotsWanted = useProfileDotsShown();
   const dots = dotsWanted && profileShown;
   const footerDownloads = useDownloadsInSidebarFooter() && hasDownloads;
+  const indicatorRoom = width - PROFILE_INDICATOR_X - HEADER_RIGHT - captionRoom - (hasDownloads && !footerDownloads ? SIDEBAR_FOOTER_DOWNLOADS.size + 2 : 0);
   const band = dots || footerDownloads ? PROFILE_DOTS_HEIGHT : 0;
   const fieldBand = field === "bottom" ? bottomFieldBand() : 0;
   const footer = band + fieldBand;
@@ -104,7 +111,7 @@ export function Sidebar({ width }: { width: number }) {
                 position: "absolute",
                 left: 0,
                 right: 0,
-                top: header - GLOW_ROOM,
+                top: header + windowLabelBand - GLOW_ROOM,
                 bottom: footer,
                 overflow: paging ? "hidden" : "visible",
               }}
@@ -143,7 +150,7 @@ export function Sidebar({ width }: { width: number }) {
                 </View>
               ) : null}
 
-              <View style={{ height: header }}>
+              <View style={{ height: header + windowLabelBand }}>
                 <ContextMenuArea style={StyleSheet.absoluteFill} onContextMenu={() => void openSidebarMenu(windowId)}>
                   <WindowDragRegion style={StyleSheet.absoluteFill} />
                 </ContextMenuArea>
@@ -154,11 +161,20 @@ export function Sidebar({ width }: { width: number }) {
                   </>
                 ) : collapsed ? null : (
                   <View pointerEvents="box-none" style={{ height: header, flexDirection: "row", alignItems: "flex-start", paddingLeft: PROFILE_INDICATOR_X, paddingRight: HEADER_RIGHT + captionRoom, paddingTop: lightsY - 17 }}>
-                    {profileShown ? <ProfileIndicator room={width - PROFILE_INDICATOR_X - HEADER_RIGHT - captionRoom - (hasDownloads && !footerDownloads ? SIDEBAR_FOOTER_DOWNLOADS.size + 2 : 0)} /> : null}
+                    {windowLabel ? (
+                      <View pointerEvents="none" style={{ alignSelf: "center", maxWidth: Math.max(0, indicatorRoom), paddingHorizontal: space.xs }}>
+                        {windowLabel}
+                      </View>
+                    ) : profileShown ? <ProfileIndicator room={indicatorRoom} /> : null}
                     <View pointerEvents="none" style={{ flex: 1 }} />
                     {hasDownloads && !footerDownloads ? <DownloadsButton windowId={windowId} /> : null}
                   </View>
                 )}
+                {windowLabelBand ? (
+                  <View pointerEvents="none" style={{ position: "absolute", top: header, left: layout.sidebarInset + space.s, right: layout.sidebarInset, height: windowLabelBand, justifyContent: "center" }}>
+                    {windowLabel}
+                  </View>
+                ) : null}
               </View>
             </TintInk>
 

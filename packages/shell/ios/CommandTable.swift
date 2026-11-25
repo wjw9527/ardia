@@ -244,6 +244,7 @@ enum CommandTable {
   static let keys: [String: [(key: String, mods: NSEvent.ModifierFlags)]] = [
     "newTab": [("t", [.command])],
     "newWindow": [("n", [.command])],
+    "newBlankWindow": [("n", [.control, .command])],
     "newIncognitoWindow": [("n", [.shift, .command])],
     "newLittleArdia": [("n", [.option, .command])],
     "reopenClosedTab": [("t", [.shift, .command])],
@@ -303,7 +304,7 @@ enum CommandTable {
     "bookmarkAllTabs": [("d", [.shift, .command])],
     "toggleBookmarksBar": [("b", [.shift, .command])],
     "newTabInGroup": [("t", [.option, .command]), ("c", [.control, .command])],
-    "newGroupWithTabs": [("n", [.control, .command]), ("p", [.control, .command])],
+    "newGroupWithTabs": [("p", [.control, .command])],
     "cleanUpTabs": [("k", [.option, .command])],
     "searchTabs": [("a", [.shift, .command])],
     "returnToPinnedUrl": [("\u{D}", [.command])],

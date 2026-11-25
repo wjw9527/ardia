@@ -68,7 +68,7 @@ export const WINDOWS_KEYS: Readonly<Record<string, readonly (string | null)[]>> 
   "selectTab:8": ["Ctrl+8"],
   selectLastTab: ["Ctrl+9"],
   togglePinnedRow: ["Ctrl+Alt+Shift+D"],
-  newGroupWithTabs: ["Ctrl+Alt+G", null],
+  newGroupWithTabs: ["Ctrl+Alt+G"],
   closeTabGroup: ["Ctrl+Alt+W"],
   bookmarkPage: ["Ctrl+D"],
   bookmarkAllTabs: ["Ctrl+Shift+D"],

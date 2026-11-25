@@ -3,6 +3,7 @@ import { isWindowClosing } from "../windows/closingWindows";
 import type { Frame } from "../browser/types";
 import type { TabPlacement } from "../pins/placing";
 import { isRegularWindow } from "../windows/small";
+import { PLATFORM_IDS } from "../../lib/platformTerms";
 import { installDroppedCrx } from "../extensions/crxDrop";
 import { activeTabId } from "../browser/model";
 import { splitOf, splitTabIdsOf } from "../splits/splits";
@@ -48,17 +49,17 @@ export function dropTabsOutside(
   const from = s.windows[source];
   if (!from || from.kind === "private" || !tabIds.length) return null;
   const { overWindow } = windowUnder(s, source, x, y, live);
-  if (overWindow) {
-    s.moveTabsToWindow(tabIds, overWindow);
-    return overWindow;
-  }
+  if (overWindow) return s.moveTabsToWindow(tabIds, overWindow) ?? null;
   const point = screenPoint(s, source, x, y, live);
   if (!point || from.tabIds.every((id) => tabIds.includes(id))) return null;
   const [, , width, height] = from.frame ?? [0, 0, 1200, 800];
   const scale = currentInterfaceScale();
   const frame: Frame = [Math.round(point[0] - NEW_WINDOW_GRAB.x * scale), Math.round(point[1] - height + NEW_WINDOW_GRAB.y * scale), width, height];
+  const profileId = s.tabs[tabIds[0]!]?.profileId;
+  const blank = PLATFORM_IDS.report === "macos" && isRegularWindow(from);
+  if (blank && (!profileId || !tabIds.every((id) => s.tabs[id]?.windowId === source && s.tabs[id]?.profileId === profileId))) return null;
   onNewWindow?.(frame);
-  return s.createWindow({ profileId: s.tabs[tabIds[0]!]?.profileId, tabIds, frame });
+  return s.createWindow({ profileId, tabIds, frame, ...(blank ? { blank } : {}) });
 }
 
 export function openDroppedUrls(windowId: string, profileId: string, placement: TabPlacement | null, urls: string[]): string[] {

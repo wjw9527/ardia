@@ -153,7 +153,7 @@ inline constexpr CommandRow kCommandRows[] = {
     {"togglePin:tile", "Move Pinned Tab to Top Apps", "Tabs", "", "", RowHiddenWhenDisabled},
     {"togglePinnedRow", "Move to Pinned", "Tabs", "option+shift+cmd+d", "ctrl+alt+shift+d"},
     {"duplicateTab", "Duplicate", "Tabs", "", ""},
-    {"newGroupWithTabs", "New Group with Tab", "Tabs", "ctrl+cmd+n|ctrl+cmd+p", "ctrl+alt+g|none"},
+    {"newGroupWithTabs", "New Group with Tab", "Tabs", "ctrl+cmd+p", "ctrl+alt+g"},
     {"closeTabGroup", "Close Group", "Tabs", "ctrl+cmd+w", "ctrl+alt+w", RowHidden},
     {"bookmarkPage", "Add to Bookmarks" ARDIA_ELLIPSIS, "Tabs", "cmd+d", "ctrl+d", RowHiddenWithBookmarks},
     {"renameTab", "Rename" ARDIA_ELLIPSIS, "Tabs", "", ""},

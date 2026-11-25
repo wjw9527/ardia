@@ -30,7 +30,7 @@ const windowOffInLittleArdia = { scope: "window", littleArdia: "off" } as const;
 export const COMMANDS = {
   newTab: { title: "New Tab", symbol: "plus", keys: ["⌘T"] },
   newWindow: { title: "New Window", symbol: "macwindow", keys: ["⌘N"] },
-  newBlankWindow: { title: "Blank Window", symbol: "macwindow" },
+  newBlankWindow: { title: "Blank Window", symbol: "macwindow", keys: ["⌃⌘N"] },
   newIncognitoWindow: { title: "New Incognito Window", symbol: "eyeglasses", keys: ["⇧⌘N"] },
   newLittleArdia: { title: "New Little Ardia Window", keys: ["⌥⌘N"] },
   toggleOpenLinksInLittleArdia: { title: "Open Links from Other Apps in Main Window" },
@@ -124,7 +124,7 @@ export const COMMANDS = {
   setBookmarksBar: { chooses: "bookmarksBar", variants: { always: { title: "Always" }, newTab: { title: "On New Tab Only" }, never: { title: "Never" } } },
   toggleBookmarksBar: { title: "Toggle Bookmarks Bar", symbol: "menubar.rectangle", keys: ["⇧⌘B"] },
   newTabInGroup: { title: "New Tab in Group", keys: ["⌥⌘T", "⌃⌘C"], ...windowOffInLittleArdia },
-  newGroupWithTabs: { title: "New Group with Tab", symbol: "folder.badge.plus", keys: ["⌃⌘N", "⌃⌘P"], ...windowOffInLittleArdia },
+  newGroupWithTabs: { title: "New Group with Tab", symbol: "folder.badge.plus", keys: ["⌃⌘P"], ...windowOffInLittleArdia },
   cleanUpTabs: { title: "Clean Up Tabs", symbol: "sparkles", keys: ["⌥⌘K"], ...windowOffInLittleArdia },
   tidyPins: { title: "Tidy Pins", symbol: "sparkles" },
   searchTabs: { title: "Search Tabs…", symbol: "magnifyingglass", keys: ["⇧⌘A"], ...windowOffInLittleArdia },
