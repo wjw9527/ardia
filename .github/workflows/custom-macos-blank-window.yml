@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 2937e1d37e238e9d6fcfdd55b89a7d49efc72216
+          ref: b7393b9c4a116aee4a217ee9d2d9fab17b6c7159
           persist-credentials: false
       - name: Verify runner
         run: |
@@ -48,6 +48,7 @@ jobs:
         run: |
           pnpm typecheck
           node --no-warnings --import ./src/test-loader.mjs --test \
+            src/state/automation/automationCommands.test.mjs \
             src/state/commands/commandCatalog.test.mjs \
             src/state/commands/windowsKeys.test.mjs \
             src/state/drag/windowDrop.test.mjs \
