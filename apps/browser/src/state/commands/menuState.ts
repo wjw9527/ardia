@@ -86,7 +86,7 @@ export function menuState(s: BrowserState, liveOfTab = (id: string) => shownLive
     if (!live.isLoading) disabled.push("stop");
     if (w.kind === "private") disabled.push("moveTabToProfile", "moveTabToWindow", "switchProfile", "nextProfile", "previousProfile");
     else if (tab) disabled.push(`moveTabToProfile:${tab.profileId}`);
-    if (isBlankWindow(w)) disabled.push("moveTabToProfile", "switchProfile", "nextProfile", "previousProfile");
+    if (isBlankWindow(w)) disabled.push("moveTabToProfile", "switchProfile", "nextProfile", "previousProfile", "openProfileMenu");
     if (isBlankWindow(w) || regularWindows.filter((id) => isSharedWindow(s.windows[id])).length < 2) disabled.push("mergeAllWindows");
   }
   const showBookmarks = bookmarksShown(s.settings);

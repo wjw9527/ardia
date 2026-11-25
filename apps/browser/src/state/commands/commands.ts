@@ -57,7 +57,7 @@ import { groupOf } from "../pins/tabGrouping";
 import { selectedTabIds } from "../pins/organize";
 import { noteSelectionClosedByKey } from "../telemetry/usage";
 import { noteUrlCopied } from "../telemetry/urlCopies";
-import { newWindowProfile, originalProfile } from "../windows/small";
+import { isBlankWindow, newWindowProfile, originalProfile } from "../windows/small";
 import { openLittleArdia } from "../littleArdia/actions";
 import { runPeekCommand } from "../peek/actions";
 import { expectFocus, findFocus } from "../focus/focusClaims";
@@ -291,7 +291,7 @@ export function runCommand({ command, arg, windowId: given }: CommandEvent, { st
       return group ? void closeGroup(group.id, mayWrite) : undefined;
     }
     case "openProfileMenu":
-      return s.windows[windowId]?.kind === "private" ? undefined : void openProfileMenu(windowId);
+      return s.windows[windowId]?.kind === "private" || isBlankWindow(s.windows[windowId]) ? undefined : void openProfileMenu(windowId);
     case "duplicateTab":
       return tab ? void s.duplicateTab(tab.id) : undefined;
     case "moveTabToProfile":
