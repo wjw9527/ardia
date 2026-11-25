@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect } from "react";
 import { Animated, View } from "react-native";
 import { usePrewarm } from "../../state/tabs/prewarm";
 import { activate } from "../../state/tabs/actions";
+import { waitsForSelection } from "../../state/tabs/pageSession";
 import { shallowEqual, useBrowserWhile, useStoreWhile, useTabValue } from "../../state/tabs/tabWatch";
 import { splitOf } from "../../state/splits/splits";
 import type { Tab } from "../../state/browser/types";
@@ -27,6 +28,7 @@ import { useDeveloperMode } from "../../state/site/developerMode";
 import { PageOverlays } from "./PageOverlays";
 import { useProfileTheme } from "./ThemeScope";
 import { markNewTabPane } from "../../state/omnibox/newTabMarks";
+import { Button } from "../ui";
 
 const LINGERING_PANE = "ardia.lingeringPane";
 
@@ -154,7 +156,12 @@ export const TabPane = memo(function TabPane({
                 {inSplit ? <SplitEmptyState tabId={tabId} focused={focused} /> : emptyCard ? <EmptyCard windowId={windowId} tabId={tabId} /> : <NewTabPage key={tabId} tabId={tabId} toolbar={toolbar} />}
               </NewTabDropArea>
             )}
-            {visible && <InternalPage contentAreaOf={tabId} />}
+            {visible && own.waitForSelection && (
+              <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                <Button variant="text" look="panel" title="Load Tab" onPress={() => activate(tabId)} />
+              </View>
+            )}
+            {visible && !own.waitForSelection && <InternalPage contentAreaOf={tabId} />}
             {visible && (
               <PageOverlays
                 tabId={tabId}
@@ -181,4 +188,4 @@ export const TabPane = memo(function TabPane({
   );
 });
 
-const paneTab = (t: Tab | undefined) => ({ exists: !!t, url: t?.url ?? "", profileId: t?.profileId ?? "" });
+const paneTab = (t: Tab | undefined) => ({ exists: !!t, url: t?.url ?? "", profileId: t?.profileId ?? "", waitForSelection: waitsForSelection(t) });

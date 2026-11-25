@@ -81,8 +81,8 @@ export type AdoptId = `${AdoptKind}:${string}`;
 export type Navigation = { url: string; seq: number; userInitiated?: boolean };
 
 export type TabPage =
-  | { kind: "idle"; wake?: AdoptId }
-  | { kind: "asleep"; wake?: AdoptId }
+  | { kind: "idle"; wake?: AdoptId; waitForSelection?: true }
+  | { kind: "asleep"; wake?: AdoptId; waitForSelection?: true }
   | { kind: "frozen"; holderId: string; wake?: AdoptId }
   | { kind: "adopted"; adopt: AdoptId; nav: Navigation | null }
   | { kind: "loaded"; nav: Navigation };

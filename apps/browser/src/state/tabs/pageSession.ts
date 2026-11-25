@@ -32,6 +32,11 @@ export const needsPage = (t: PagedAt) => isLazy(t) && t.page.kind !== "frozen";
 
 export const restoredLazily = (t: PagedAt) => !!t.url && t.page.kind === "idle";
 
+export const waitsForSelection = (t: Paged | undefined): boolean => {
+  const page = t?.page;
+  return (page?.kind === "idle" || page?.kind === "asleep") && page.waitForSelection === true;
+};
+
 export const wakeOf = (t: Paged | undefined): AdoptId | undefined => (t && "wake" in t.page ? t.page.wake : undefined);
 
 export const withWake = (page: TabPage, wake: AdoptId | undefined): TabPage => {

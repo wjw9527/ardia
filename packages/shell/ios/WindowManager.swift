@@ -147,17 +147,21 @@ final class WindowManager: NSObject, NSWindowDelegate {
     if let lights = lightsCenters[id] { ChromeWindows.setTrafficLightsCenter(lights.center, trailing: lights.trailing, in: window) }
     window.title = title
     Self.identify(window, id: id, kind: entry.kind)
+    let fullscreen = ArdiaChromeWindowHost.windowIsFullScreen(window)
     let wanted = small && frame == nil ? smallSize ?? Self.smallDefaultSize : nil
-    if let wanted { placeSmall(window, id: id, size: wanted, pointer: smallPointer) } else if frame != nil || !window.isVisible { place(window, frame: frame, display: display) }
+    if let wanted { placeSmall(window, id: id, size: wanted, pointer: smallPointer) }
+    else if !fullscreen && (frame != nil || !window.isVisible) { place(window, frame: frame, display: display) }
     let placement = wanted.map { (wanted: $0, placed: window.frame) }
-    relayoutRoot(window)
     managed[id] = entry
+    observeFrame(window)
+    if fullscreen {
+      entry.isFullScreen = true
+      sendFullScreen(window, id: id, on: true)
+    }
+    relayoutRoot(window)
     if !small { lastPlaced = window }
     if !small && window.isKeyWindow { lastKeyBrowser = window }
-    if window.isMiniaturized {
-      observeFrame(window)
-      return reportFrame(window)
-    }
+    if window.isMiniaturized { return reportFrame(window) }
     let summoned = small && focus && smallPointer == nil && LittleArdiaHotKey.shared.takePress() && !NSApp.isActive
     entry.summoned = summoned
     if summoned { ArdiaChromeWindowHost.floatOverActiveSpace(window) }
@@ -186,7 +190,6 @@ final class WindowManager: NSObject, NSWindowDelegate {
       SummonedWindow.bringForward(window)
       entry.whenRevealed { [weak window] in if let window { SummonedWindow.checkLanding(window) } }
     }
-    observeFrame(window)
     reportFrame(window)
     if small { fitToLanding(entry, placement: placement) }
     fullScreen.windowShown(id)

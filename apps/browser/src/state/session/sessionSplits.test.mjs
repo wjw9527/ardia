@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 const { useBrowser } = await import("../browser/store.ts");
 const { flushPersistence, loadSession, startPersistence } = await import("./persist.ts");
+const { wakePanes } = await import("../windows/card.ts");
 const stub = await import("../../test-native/index.ts");
 
 const S = () => useBrowser.getState();
@@ -79,6 +80,30 @@ test("a stack at the last pane is dropped and every pane kept; sizes that don't 
   assert.deepEqual(S().splits.badSizes.slots.map((x) => x.size), [0.5, 0.5]);
 });
 
+test("restoring multiple windows loads only the selected tab in each window", () => {
+  stub.docs.clear();
+  const doc = oldDocument(6);
+  doc.tabs.find((t) => t.id === "b").page = { kind: "idle", wake: "restore:split-b" };
+  const tabIds = ["n", "o"];
+  doc.tabs.push(...tabIds.map((id) => tab(id, { windowId: "w2" })));
+  doc.windows.push({ ...doc.windows[0], id: "w2", tabIds, activeTabIds: { default: "o" } });
+  doc.windowOrder.push("w2");
+  stub.docs.set("session.json", JSON.stringify(doc));
+  S().hydrate(loadSession());
+  assert.deepEqual(S().tabs.b.page, { kind: "idle", wake: "restore:split-b", waitForSelection: true });
+  wakePanes(["a", "b"]);
+  wakePanes(["o"]);
+  const loaded = () => Object.values(S().tabs).filter((t) => t.page.kind === "loaded" || t.page.kind === "adopted").map((t) => t.id).sort();
+  assert.deepEqual(loaded(), ["a", "o"]);
+  S().activate("b");
+  assert.equal(S().windows.w1.activeTabIds.default, "b");
+  assert.equal(S().tabs.b.page.adopt, "restore:split-b");
+  S().activate("n");
+  assert.equal(S().windows.w2.activeTabIds.default, "n");
+  assert.deepEqual(loaded(), ["a", "b", "n", "o"]);
+  assertSplits();
+});
+
 test("the slots save as they are and read back the same", () => {
   stub.docs.clear();
   stub.docs.set("session.json", JSON.stringify(oldDocument(6)));
@@ -89,6 +114,7 @@ test("the slots save as they are and read back the same", () => {
   const saved = JSON.parse(stub.docs.get("session.json"));
   assert.ok(saved.version >= 7);
   assert.deepEqual(saved.splits.find((v) => v.id === "stacked").slots, EXPECTED.stacked.slots);
+  assert.deepEqual(saved.tabs.find((t) => t.id === "b").page, { kind: "idle" });
   S().hydrate(loadSession());
   assertSplits();
 });

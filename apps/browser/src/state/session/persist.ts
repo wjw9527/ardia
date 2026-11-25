@@ -10,6 +10,7 @@ import { restoreLaunchLook, saveLaunchLook } from "../windows/launchLook";
 import { parkWindowPins } from "../pins/parkedPins";
 import { closedWindowEntry, MAX_CLOSED_WINDOWS } from "../pins/closedTabs";
 import { isPeekTab } from "../peek/peek";
+import { splitTabIds } from "../splits/splits";
 import type { BrowserWindow, ClosedWindow, ParkedPins, Profile, SplitView, Tab } from "../browser/types";
 import { downloadSession, withoutRepeats } from "../downloads/downloadsSlice";
 import { anyDownloadProgress, withLiveProgress } from "../downloads/progress";
@@ -252,6 +253,21 @@ function closedForLaunch(session: SavedSession): HydrateData {
   return { ...session, parkedPins, closedWindows, windows: {}, windowOrder: [], tabs: {} };
 }
 
+function withDeferredSplitPanes(session: SavedSession): SavedSession {
+  let tabs = session.tabs;
+  for (const split of Object.values(session.splits ?? {})) {
+    for (const id of splitTabIds(split)) {
+      const tab = tabs[id];
+      const page = tab?.page;
+      if (tab?.url && (page?.kind === "idle" || page?.kind === "asleep")) {
+        if (tabs === session.tabs) tabs = { ...tabs };
+        tabs[id] = { ...tab, page: { ...page, waitForSelection: true } };
+      }
+    }
+  }
+  return tabs === session.tabs ? session : { ...session, tabs };
+}
+
 export type LaunchOverrides = { restoreSession?: boolean };
 
 export function loadSession({ restoreSession }: LaunchOverrides = {}): (HydrateData & { windowsAgainstAutoHideTabs: number }) | null {
@@ -259,7 +275,7 @@ export function loadSession({ restoreSession }: LaunchOverrides = {}): (HydrateD
   if (!session) return null;
   const downloads = savedDownloads({ profiles: session.profiles ?? {} });
   const restore = restoreSession ?? session.settings?.restoreSession !== false;
-  const data = restore ? session : closedForLaunch(session);
+  const data = restore ? withDeferredSplitPanes(session) : closedForLaunch(session);
   return { ...data, downloads, windowsAgainstAutoHideTabs: restore ? session.windowsAgainstAutoHideTabs : 0 };
 }
 

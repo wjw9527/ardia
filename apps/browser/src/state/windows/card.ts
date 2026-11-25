@@ -7,7 +7,7 @@ import type { AdoptKind, SplitView, Tab } from "../browser/types";
 import { tabEngine, type PageEngine } from "../engines/engines";
 import { holderOf } from "../pins/pinShare";
 import { splitOf } from "../splits/splits";
-import { adoptOf, frozenOn, needsPage, wokenPage } from "../tabs/pageSession";
+import { adoptOf, frozenOn, needsPage, waitsForSelection, wokenPage } from "../tabs/pageSession";
 import { adoptKind } from "../tabs/adoptIds";
 import { pageOf, patchPage } from "../tabs/pageState";
 import { wantsPage } from "../tabs/tabPages";
@@ -70,7 +70,7 @@ export function wakePanes(ids: string[]) {
   const s = useBrowser.getState();
   for (const id of ids) {
     const t = s.tabs[id];
-    if (!t || !needsPage(t)) continue;
+    if (!t || !needsPage(t) || waitsForSelection(t)) continue;
     const holder = holderOf(s, id);
     s.updateTab(id, { page: holder ? frozenOn(t, holder.id) : wokenPage(t) });
   }

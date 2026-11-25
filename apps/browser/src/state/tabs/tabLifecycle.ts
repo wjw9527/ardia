@@ -124,10 +124,6 @@ export function startTabLifecycle() {
           system = next;
           updateBatterySaver(true);
         });
-        setTimeout(() => {
-          const sys = currentSystem();
-          if (sys) reloadRecentTabs(sys);
-        }, 3000);
       },
       () => {},
     );
