@@ -7,6 +7,7 @@ export type AutomationDecision = "run" | "endsApp" | "changesEngine" | "leftOutS
 export const AUTOMATION: Readonly<Record<BrowserCommand, AutomationDecision>> = {
   newTab: "run",
   newWindow: "run",
+  newBlankWindow: "run",
   newIncognitoWindow: "run",
   newLittleArdia: "run",
   toggleOpenLinksInLittleArdia: "run",
