@@ -12,6 +12,10 @@ export const isSmallWindow = (w: BrowserWindow | undefined): boolean => w?.kind 
 
 export const isRegularWindow = (w: BrowserWindow | undefined): w is MainWindow => w?.kind === "main";
 
+export const isBlankWindow = (w: BrowserWindow | undefined): boolean => isRegularWindow(w) && w.blank === true;
+
+export const isSharedWindow = (w: BrowserWindow | undefined): w is MainWindow => isRegularWindow(w) && !w.blank;
+
 export const isSmall = (s: Pick<BrowserState, "windows">, windowId?: string | null): boolean =>
   !!windowId && s.windows[windowId]?.kind === "small";
 
@@ -25,7 +29,8 @@ export const isOnlyRegularWindow = (s: Pick<BrowserState, "windows">, id: string
 
 export function mainWindowFor(s: BrowserState, profileId?: string): string | undefined {
   const order = [...new Set([...s.ui.focusOrder, ...s.windowOrder])].filter((id) => isOpenRegularWindow(s.windows[id]));
-  return (profileId ? order.find((id) => s.windows[id]!.profileId === profileId) : undefined) ?? order[0];
+  if (!profileId) return order[0];
+  return order.find((id) => s.windows[id]!.profileId === profileId) ?? order.find((id) => isSharedWindow(s.windows[id]));
 }
 
 export function originalProfile(s: Pick<BrowserState, "profiles">, w: BrowserWindow | undefined): string | undefined {

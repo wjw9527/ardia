@@ -1,7 +1,7 @@
 import type { BrowserState } from "../browser/store";
 import { isIncognitoProfile, pinKeyOf } from "../browser/model";
 import { parkWindowPins } from "../pins/parkedPins";
-import { isRegularWindow } from "../windows/small";
+import { isSharedWindow } from "../windows/small";
 import { isFields } from "../../lib/decode";
 import { readDocument, saveDocument } from "../../platform/documents";
 import type { ParkedPins } from "../browser/types";
@@ -28,14 +28,14 @@ export function pinCensus(s: PinState): PinCensus {
     else census.set(profileId, new Set([key]));
   };
   for (const w of Object.values(s.windows)) {
-    if (!isRegularWindow(w)) continue;
+    if (!isSharedWindow(w)) continue;
     for (const id of w.tabIds) {
       const t = s.tabs[id];
       if (t?.pin) add(t.profileId, `t:${pinKeyOf(t)}`);
     }
   }
   for (const g of Object.values(s.groups)) {
-    if (!g.pinned || !isRegularWindow(s.windows[g.windowId])) continue;
+    if (!g.pinned || !isSharedWindow(s.windows[g.windowId])) continue;
     add(g.profileId, `g:${pinKeyOf(g)}`);
     for (const id of g.tabIds) {
       const t = s.tabs[id];
@@ -65,7 +65,7 @@ export function pinsOf(s: PinState, profileIds: string[]): Record<string, Parked
   const wanted = new Set(profileIds);
   const profilesIn = (w: PinState["windows"][string]) => w.tabIds.some((id) => wanted.has(s.tabs[id]?.profileId ?? ""));
   let live: Record<string, ParkedPins> = {};
-  for (const w of Object.values(s.windows)) if (isRegularWindow(w) && profilesIn(w)) live = parkWindowPins(live, w, { ...s, windows: { [w.id]: w } });
+  for (const w of Object.values(s.windows)) if (isSharedWindow(w) && profilesIn(w)) live = parkWindowPins(live, w, { ...s, windows: { [w.id]: w } });
   const pins: Record<string, ParkedPins> = {};
   for (const profileId of wanted) {
     const own = live[profileId] ?? { tabs: [], groups: [] };

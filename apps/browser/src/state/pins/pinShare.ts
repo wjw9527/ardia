@@ -5,12 +5,12 @@ import { asleepFrom, frozenOn, hasPage, holderOfPage, needsPage, withNavigationA
 import { splitOf, splitTabIds } from "../splits/splits";
 import { sharedListTab } from "../tabs/tabShare";
 import type { BrowserWindow, Tab, TabGroup } from "../browser/types";
-import { isRegularWindow } from "../windows/small";
+import { isSharedWindow } from "../windows/small";
 import { isTopApp, sameTopApp, sharingChanged } from "./topApps";
 
 
 export function shares(s: BrowserState, t: Tab | undefined): t is Tab {
-  return !!t && !isIncognitoProfile(t.profileId) && isRegularWindow(s.windows[t.windowId]) && (inPinnedContainer(s, t.id) || sharedListTab(s, t)) && !splitOf(s, t.id);
+  return !!t && !isIncognitoProfile(t.profileId) && isSharedWindow(s.windows[t.windowId]) && (inPinnedContainer(s, t.id) || sharedListTab(s, t)) && !splitOf(s, t.id);
 }
 
 const familyOf = (s: BrowserState, holder: Tab, copy: Tab) =>
@@ -260,7 +260,7 @@ export function handPagesOutOfProfile(s: BrowserState, profileId: string): Brows
 
 export function returnSharedPages(s: BrowserState, windowId: string): BrowserState {
   const w = s.windows[windowId];
-  if (!isRegularWindow(w) || !frozenIds(s).length) return s;
+  if (!isSharedWindow(w) || !frozenIds(s).length) return s;
   let next = s;
   for (const id of w.tabIds) {
     const t = next.tabs[id];

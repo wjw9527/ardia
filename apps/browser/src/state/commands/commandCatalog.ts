@@ -30,6 +30,7 @@ const windowOffInLittleArdia = { scope: "window", littleArdia: "off" } as const;
 export const COMMANDS = {
   newTab: { title: "New Tab", symbol: "plus", keys: ["⌘T"] },
   newWindow: { title: "New Window", symbol: "macwindow", keys: ["⌘N"] },
+  newBlankWindow: { title: "Blank Window", symbol: "macwindow" },
   newIncognitoWindow: { title: "New Incognito Window", symbol: "eyeglasses", keys: ["⇧⌘N"] },
   newLittleArdia: { title: "New Little Ardia Window", keys: ["⌥⌘N"] },
   toggleOpenLinksInLittleArdia: { title: "Open Links from Other Apps in Main Window" },

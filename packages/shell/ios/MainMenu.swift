@@ -99,6 +99,7 @@ enum MainMenu {
       cmd(.newTab),
       cmd(.newTabInGroup),
       cmd(.newWindow),
+      cmd(.newBlankWindow),
       cmd(.newIncognitoWindow),
       cmd(.newLittleArdia),
       littleArdiaInProfileItem,
@@ -457,6 +458,9 @@ enum MainMenu {
       item.windowless = true
       menu.addItem(item)
     }
+    let blank = CommandItem("Blank Window", "newBlankWindow")
+    blank.windowless = true
+    menu.addItem(blank)
     let incognito = CommandItem("New Incognito Window", "newIncognitoWindow")
     incognito.windowless = true
     menu.addItem(incognito)

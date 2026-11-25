@@ -34,6 +34,7 @@ const layoutSwitchesTo = ({ s, windowId }: Context) => (tabLayoutOf(s, windowId)
 const DEFS: ActionDef[] = [
   { command: "newTab", keywords: ["open tab"] },
   { command: "newWindow" },
+  { command: "newBlankWindow", keywords: ["new blank window", "empty window"] },
   { command: "newIncognitoWindow", keywords: ["private window", "incognito"] },
   { command: "closeTab", needs: "tab" },
   { command: "closeAllTabs", keywords: ["clear unpinned tabs", "close unpinned tabs", "clear today"] },

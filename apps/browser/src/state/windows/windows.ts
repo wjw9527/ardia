@@ -21,7 +21,7 @@ import { holderOf, returnSharedPages, swapPinPage } from "../pins/pinShare";
 import { isTopApp, topAppsShared } from "../pins/topApps";
 import { joinedWithCurrent, newTabPlacement } from "../tabs/openers";
 import { handOverPins, handOverTabs, tabsClosedWithWindow } from "../tabs/sharedWindowClose";
-import { isOnlyRegularWindow, isOpenRegularWindow, isRegularWindow, isSmall, isSmallWindow, lastActiveProfile, linkProfileOf, mainWindowFor } from "./small";
+import { isBlankWindow, isOnlyRegularWindow, isOpenRegularWindow, isRegularWindow, isSharedWindow, isSmall, isSmallWindow, lastActiveProfile, linkProfileOf, mainWindowFor } from "./small";
 import { activated, apply, removeTabs, withNewTab } from "../tabs/tabs";
 import type { AdoptId, BrowserWindow, ClosedWindow, Frame, ParkedPins, Tab, WindowKind } from "../browser/types";
 import { emptyWindow, smallWindow, withWindow } from "./newWindow";
@@ -42,6 +42,7 @@ import { droppedInProfile, intoProfile } from "./profileMoves";
 export type CreateWindowOptions = {
   profileId?: string;
   kind?: WindowKind;
+  blank?: boolean;
   url?: string;
   adoptId?: AdoptId;
   tabIds?: string[];
@@ -96,7 +97,7 @@ export function moveTabsInto(s: BrowserState, ids: string[], targetId: string): 
   if (!target || isSmallWindow(target)) return s;
   const moving = ids
     .map((id) => s.tabs[id])
-    .filter((t): t is Tab => !!t && t.windowId !== targetId && !isIncognitoProfile(t.profileId) && target.kind !== "private");
+    .filter((t): t is Tab => !!t && t.windowId !== targetId && !isIncognitoProfile(t.profileId) && target.kind !== "private" && (!isBlankWindow(target) || t.profileId === target.profileId));
   if (!moving.length) return s;
 
   const sources = new Set(moving.map((t) => t.windowId));
@@ -164,6 +165,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
       kind === "small"
         ? { ...smallWindow(id, profileId, o.frame ?? null), ...(o.linkPointer ? { linkPointer: o.linkPointer } : {}), ...(o.linkApp ? { linkApp: o.linkApp } : {}) }
         : { ...emptyWindow(id, profileId, kind, o.frame ?? null), ...(o.chromeWindow ? { chromeWindow: o.chromeWindow } : {}), ...(o.opensBehind && kind === "main" ? { opensBehind: o.opensBehind } : {}) };
+    if (w.kind === "main" && o.blank) w.blank = true;
     const from = o.tabIds?.length && !small ? s.windows[s.tabs[o.tabIds[0]!]?.windowId ?? ""] : undefined;
     if (from?.autoHideTabs !== undefined && !isSmallWindow(from)) {
       w.autoHideTabs = from.autoHideTabs;
@@ -171,7 +173,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     }
     let next = withWindow(s, w);
     if (o.tabIds?.length && !small) next = moveTabsInto(next, o.tabIds, id);
-    const home = !next.windows[id]!.tabIds.length && o.url === undefined && !small && !o.adoptId ? newTabHome(s, id, profileId) : undefined;
+    const home = !next.windows[id]!.tabIds.length && o.url === undefined && !small && !isBlankWindow(w) && !o.adoptId ? newTabHome(s, id, profileId) : undefined;
     if (!next.windows[id]!.tabIds.length) next = withNewTab(next, id, { url: o.url ?? home?.url, replaced: home?.replaced, adoptId: o.adoptId })[0];
     const first = next.windows[id]!.tabIds[0]!;
     const shown = next.windows[id]!.activeTabIds[next.tabs[first]!.profileId] ?? first;
@@ -254,7 +256,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
   switchProfile(windowId, profileId) {
     let s = get();
     const w = s.windows[windowId];
-    if (!w || w.kind === "private" || isSmallWindow(w) || !s.profiles[profileId] || w.profileId === profileId) return;
+    if (!w || w.kind === "private" || isSmallWindow(w) || isBlankWindow(w) || !s.profiles[profileId] || w.profileId === profileId) return;
     s = adoptParkedPins(s, windowId, profileId);
     const remembered = w.activeTabIds[profileId];
     let target = remembered && s.tabs[remembered]?.windowId === windowId ? remembered : undefined;
@@ -275,6 +277,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
       return get().createWindow({ profileId: first.profileId, tabIds });
     }
     let next = moveTabsInto(s, tabIds, windowId);
+    if (next === s && isBlankWindow(s.windows[windowId])) return undefined;
     const last = background ? undefined : findLast(tabIds, (id) => next.tabs[id]?.windowId === windowId);
     if (last) next = apply(next, activated(next, last));
     set(next);
@@ -292,6 +295,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     const s = get();
     const tab = s.tabs[tabId];
     const w = tab && s.windows[tab.windowId];
+    if (isBlankWindow(w)) return;
     if (!background && tab && isRegularWindow(w) && isTopApp(tab) && topAppsShared(s, tab.profileId, profileId)) {
       get().switchProfile(w.id, profileId);
       const now = get();
@@ -304,6 +308,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
 
   dropTabsInProfile(tabIds, profileId, drop) {
     const s = get();
+    if (tabIds.some((id) => isBlankWindow(s.windows[s.tabs[id]?.windowId ?? ""]))) return null;
     const { state: next, placed } = droppedInProfile(s, tabIds, profileId, drop);
     if (next === s) return null;
     set(next);
@@ -311,8 +316,10 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
   },
 
   moveGroupToWindow(groupId, windowId, options) {
-    const g = get().groups[groupId];
-    if (!g || g.pinned) return undefined;
+    const s = get();
+    const g = s.groups[groupId];
+    const targetWindow = windowId ? s.windows[windowId] : undefined;
+    if (!g || g.pinned || (isBlankWindow(targetWindow) && targetWindow?.profileId !== g.profileId)) return undefined;
     const tree = groupTree(get().groups, groupId);
     const kept = splitsWithin(get(), g.tabIds);
     const target = get().moveTabsToWindow(g.tabIds, windowId, options);
@@ -323,7 +330,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
   moveGroupToProfile(groupId, profileId, { background = false } = {}) {
     const s = get();
     const g = s.groups[groupId];
-    if (!g || g.profileId === profileId || !s.profiles[profileId] || isIncognitoProfile(g.profileId)) return;
+    if (!g || isBlankWindow(s.windows[g.windowId]) || g.profileId === profileId || !s.profiles[profileId] || isIncognitoProfile(g.profileId)) return;
     const tree = groupTree(s.groups, groupId);
     const kept = splitsWithin(s, g.tabIds);
     let next = g.tabIds.reduce((acc, id) => intoProfile(acc, id, profileId), s);
@@ -334,9 +341,12 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
 
   mergeAllWindows(windowId) {
     const s = get();
-    const target = s.windows[windowId]?.kind === "private" || isSmallWindow(s.windows[windowId]) ? mainWindowFor(s) : windowId;
-    if (!target) return;
-    const others = s.windowOrder.filter((id) => id !== target && s.windows[id]?.kind !== "private" && !isSmallWindow(s.windows[id]));
+    const source = s.windows[windowId];
+    const target = source?.kind === "private" || isSmallWindow(source)
+      ? [...new Set([...s.ui.focusOrder, ...s.windowOrder])].find((id) => isSharedWindow(s.windows[id]) && isOpenRegularWindow(s.windows[id]))
+      : windowId;
+    if (!target || !isSharedWindow(s.windows[target])) return;
+    const others = s.windowOrder.filter((id) => id !== target && isSharedWindow(s.windows[id]));
     const tabIds = others.flatMap((id) => s.windows[id]!.tabIds);
     if (!tabIds.length) return;
     let next = moveTabsInto(s, tabIds, target);

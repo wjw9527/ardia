@@ -6,7 +6,7 @@ import { restoreId } from "../tabs/adoptIds";
 import { adoptedPage, hasPage } from "../tabs/pageSession";
 import { adoptParkedPins } from "../pins/parkedPins";
 import { holderOf, swapPinPage } from "../pins/pinShare";
-import { isOpenRegularWindow, lastActiveProfile } from "./small";
+import { isBlankWindow, isOpenRegularWindow, lastActiveProfile } from "./small";
 import { activated, apply, withNewTab } from "../tabs/tabs";
 import type { ClosedTab, ClosedWindow, SplitView, TabGroup } from "../browser/types";
 import { mapSlotIds, slotTabIds } from "../splits/splits";
@@ -61,7 +61,7 @@ const closedBefore = (closed: ClosedTab[], entry: ClosedTab) =>
 function canRestoreTabInto(s: BrowserState, c: ClosedTab, windowId: string | undefined): boolean {
   const w = windowId ? s.windows[windowId] : undefined;
   if (isIncognitoProfile(c.tab.profileId)) return c.windowId === windowId;
-  return w?.kind !== "private";
+  return w?.kind !== "private" && (!isBlankWindow(w) || w?.profileId === c.tab.profileId);
 }
 
 export function restoreTab(s: BrowserState, entry: ClosedTab, requested?: string | null): BrowserState {
@@ -69,7 +69,7 @@ export function restoreTab(s: BrowserState, entry: ClosedTab, requested?: string
   const key = entry.pinKey ?? entry.tabId;
   if (entry.pinnedTile && key && entry.tabId && !s.tabs[entry.tabId] && s.parkedPins[owner]?.tabs.some((p) => p.id === key)) {
     const target = resolveWindowId(s, requested);
-    let windowId = target && s.windows[target]!.kind !== "private" && s.windows[target]!.profileId === owner ? target : undefined;
+    let windowId = target && s.windows[target]!.kind !== "private" && !isBlankWindow(s.windows[target]) && s.windows[target]!.profileId === owner ? target : undefined;
     let next = s;
     if (!windowId) {
       windowId = newId("w");
@@ -128,6 +128,7 @@ export function restoreWindow(s: BrowserState, entry: ClosedWindow): BrowserStat
   const id = newId("w");
   const profileOk = (p: string) => (s.profiles[p] ? p : s.settings.defaultProfileId);
   const w = emptyWindow(id, profileOk(entry.window.profileId), "main", entry.window.frame);
+  if (w.kind === "main" && entry.window.blank === true) w.blank = true;
   if (entry.window.restoredFrame) w.restoredFrame = entry.window.restoredFrame;
   if (entry.window.maximized) w.maximized = true;
   if (entry.window.tabLayout) w.tabLayout = entry.window.tabLayout;

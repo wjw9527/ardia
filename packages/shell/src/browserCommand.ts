@@ -1,6 +1,7 @@
 export type BrowserCommand =
   | "newTab"
   | "newWindow"
+  | "newBlankWindow"
   | "newIncognitoWindow"
   | "newLittleArdia"
   | "toggleOpenLinksInLittleArdia"

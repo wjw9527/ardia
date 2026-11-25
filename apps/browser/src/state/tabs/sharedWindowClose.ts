@@ -4,7 +4,7 @@ import { orderSections, syncGroupOrder } from "../groups/groups";
 import { adoptParkedPins } from "../pins/parkedPins";
 import { profilesOf } from "../pins/pinMirror";
 import { splitTabIds } from "../splits/splits";
-import { isRegularWindow } from "../windows/small";
+import { isBlankWindow, isSharedWindow } from "../windows/small";
 import { withNavigationAt } from "./pageSession";
 import { sharedListTab, sharesTabs } from "./tabShare";
 import type { BrowserWindow, Tab } from "../browser/types";
@@ -13,14 +13,15 @@ import { noteWindowClosePinsKept } from "../telemetry/windowPlacementCounts";
 
 type KeepsTabs = (w: BrowserWindow | undefined) => boolean;
 
-export function sharedElsewhere(s: BrowserState, t: Tab, keepsTabs: KeepsTabs = isRegularWindow): boolean {
+export function sharedElsewhere(s: BrowserState, t: Tab, keepsTabs: KeepsTabs = isSharedWindow): boolean {
   if (!sharedListTab(s, t)) return false;
   const key = pinKeyOf(t);
-  return Object.values(s.tabs).some((x) => x.id !== t.id && x.windowId !== t.windowId && x.profileId === t.profileId && pinKeyOf(x) === key && keepsTabs(s.windows[x.windowId]));
+  return Object.values(s.tabs).some((x) => x.id !== t.id && x.windowId !== t.windowId && x.profileId === t.profileId && pinKeyOf(x) === key && isSharedWindow(s.windows[x.windowId]) && keepsTabs(s.windows[x.windowId]));
 }
 
-export function tabsClosedWithWindow(s: BrowserState, windowId: string, keepsTabs: KeepsTabs = isRegularWindow): Tab[] {
-  return (s.windows[windowId]?.tabIds ?? []).map((id) => s.tabs[id]).filter((t): t is Tab => !!t && !inPinnedContainer(s, t.id) && !sharedElsewhere(s, t, keepsTabs));
+export function tabsClosedWithWindow(s: BrowserState, windowId: string, keepsTabs: KeepsTabs = isSharedWindow): Tab[] {
+  const w = s.windows[windowId];
+  return (w?.tabIds ?? []).map((id) => s.tabs[id]).filter((t): t is Tab => !!t && (isBlankWindow(w) || (!inPinnedContainer(s, t.id) && !sharedElsewhere(s, t, keepsTabs))));
 }
 
 export function tabsLostWithWindow(s: BrowserState, windowId: string, keepsTabs: KeepsTabs): Tab[] {
@@ -29,21 +30,21 @@ export function tabsLostWithWindow(s: BrowserState, windowId: string, keepsTabs:
 }
 
 function heirWindow(s: BrowserState, windowId: string, keepsTabs: KeepsTabs): string | undefined {
-  return [...new Set([...s.ui.focusOrder, ...s.windowOrder])].find((id) => id !== windowId && keepsTabs(s.windows[id]));
+  return [...new Set([...s.ui.focusOrder, ...s.windowOrder])].find((id) => id !== windowId && isSharedWindow(s.windows[id]) && keepsTabs(s.windows[id]));
 }
 
-export function tabsHandedOver(s: BrowserState, windowId: string, keepsTabs: KeepsTabs = isRegularWindow): string[] {
+export function tabsHandedOver(s: BrowserState, windowId: string, keepsTabs: KeepsTabs = isSharedWindow): string[] {
   const w = s.windows[windowId];
-  if (!sharesTabs(s) || !isRegularWindow(w) || !heirWindow(s, windowId, keepsTabs)) return [];
+  if (!sharesTabs(s) || !isSharedWindow(w) || !heirWindow(s, windowId, keepsTabs)) return [];
   const held = new Set<string>();
-  for (const o of Object.values(s.windows)) if (o.id !== windowId && keepsTabs(o)) for (const p of profilesOf(s, o)) held.add(p);
+  for (const o of Object.values(s.windows)) if (o.id !== windowId && isSharedWindow(o) && keepsTabs(o)) for (const p of profilesOf(s, o)) held.add(p);
   return w.tabIds.filter((id) => {
     const t = s.tabs[id];
     return !!t && !held.has(t.profileId) && !!t.url && !t.liveItem && !inPinnedContainer(s, id) && !isPeekTab(s, id);
   });
 }
 
-export function handOverTabs(s: BrowserState, windowId: string, keepsTabs: KeepsTabs = isRegularWindow): BrowserState {
+export function handOverTabs(s: BrowserState, windowId: string, keepsTabs: KeepsTabs = isSharedWindow): BrowserState {
   const ids = tabsHandedOver(s, windowId, keepsTabs);
   const heirId = heirWindow(s, windowId, keepsTabs);
   const heir = heirId ? s.windows[heirId] : undefined;
@@ -75,7 +76,7 @@ export function handOverTabs(s: BrowserState, windowId: string, keepsTabs: Keeps
   return { ...s, tabs, groups: syncGroupOrder(groups, window), splits, windows: { ...s.windows, [heir.id]: window, [windowId]: left } };
 }
 
-export function handOverPins(s: BrowserState, before: BrowserState, windowId: string, keepsTabs: KeepsTabs = isRegularWindow): BrowserState {
+export function handOverPins(s: BrowserState, before: BrowserState, windowId: string, keepsTabs: KeepsTabs = isSharedWindow): BrowserState {
   const heirId = heirWindow(before, windowId, keepsTabs);
   if (!heirId || !s.windows[heirId]) return s;
   const profiles = new Set(tabsHandedOver(before, windowId, keepsTabs).map((id) => before.tabs[id]!.profileId));

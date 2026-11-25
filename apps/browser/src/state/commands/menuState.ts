@@ -18,6 +18,7 @@ import { LITTLE_ARDIA_DISABLED_COMMANDS, PAGE_COMMANDS, PAGE_COMMANDS_OFF_INTERN
 import { extensionMenu } from "../extensions/actions";
 import type { InstalledExtension } from "../extensions/store";
 import { menuBarBindings, menuBarMouseBindings } from "./commandShortcuts";
+import { isBlankWindow, isSharedWindow } from "../windows/small";
 import { focusedWindowOf } from "../windows/ui";
 import { clearableRecentlyClosed, closedWindowTitle, newestClosed, recentlyClosedIn } from "../windows/recentlyClosedList";
 import { BOOKMARK_COMMANDS, bookmarksShown } from "../bookmarks/visibility";
@@ -85,7 +86,8 @@ export function menuState(s: BrowserState, liveOfTab = (id: string) => shownLive
     if (!live.isLoading) disabled.push("stop");
     if (w.kind === "private") disabled.push("moveTabToProfile", "moveTabToWindow", "switchProfile", "nextProfile", "previousProfile");
     else if (tab) disabled.push(`moveTabToProfile:${tab.profileId}`);
-    if (regularWindows.length < 2) disabled.push("mergeAllWindows");
+    if (isBlankWindow(w)) disabled.push("moveTabToProfile", "switchProfile", "nextProfile", "previousProfile");
+    if (isBlankWindow(w) || regularWindows.filter((id) => isSharedWindow(s.windows[id])).length < 2) disabled.push("mergeAllWindows");
   }
   const showBookmarks = bookmarksShown(s.settings);
   if (!showBookmarks) disabled.push(...BOOKMARK_COMMANDS);
@@ -135,7 +137,7 @@ export function menuState(s: BrowserState, liveOfTab = (id: string) => shownLive
     disabled,
     titles,
     profiles: s.profileOrder.map((id) => ({ id, title: s.profiles[id]!.name, current: w?.profileId === id })),
-    windows: w?.kind === "private" ? [] : regularWindows.filter((id) => id !== windowId).map((id) => ({ id, title: windowTitle(s, id) })),
+    windows: w?.kind === "private" ? [] : regularWindows.filter((id) => id !== windowId && (!isBlankWindow(s.windows[id]) || s.windows[id]!.profileId === tab?.profileId)).map((id) => ({ id, title: windowTitle(s, id) })),
     ...bookmarkMenus(s.bookmarks, engineProfile(s, bookmarkProfile)),
     bookmarksShown: showBookmarks,
     recentlyClosed: closed,

@@ -12,7 +12,7 @@ import { customNewTabUrl, resolveTyped } from "../settings/settings";
 import { openSettings } from "../settings/settingsWindows";
 import { appUrlAction } from "../pages/appUrls";
 import { handOffPinPage } from "../pins/pinHandoff";
-import { mainWindowFor } from "../windows/small";
+import { isBlankWindow, mainWindowFor } from "../windows/small";
 import { holderOf, swapPinPage } from "../pins/pinShare";
 import { engineForUrl, tabEngine, typedNavigationEngine } from "../engines/engines";
 import type { ClosedTab, Tab, TabLive } from "../browser/types";
@@ -64,15 +64,17 @@ export const createTabsSlice: StateCreator<BrowserState, [], [], TabsSlice> = (s
   newTab(windowId, options) {
     const home = options?.newTabCommand && !options.url && !options.adoptId && !options.gated ? customNewTabUrl(get().settings) : undefined;
     if (home) return get().newTab(windowId, { ...options, url: home });
-    const small = get().windows[windowId];
-    if (small?.kind === "small" && small.tabIds.length) {
-      const profileId = options?.profileId ?? small.profileId;
+    const w = get().windows[windowId];
+    const requestedProfile = options?.profileId ?? options?.snapshot?.profileId;
+    const foreignBlank = isBlankWindow(w) && !!requestedProfile && !!get().profiles[requestedProfile] && requestedProfile !== w?.profileId;
+    if (w && ((w.kind === "small" && w.tabIds.length) || foreignBlank)) {
+      const profileId = (foreignBlank ? requestedProfile : options?.profileId) ?? w.profileId;
       const main = mainWindowFor(get(), profileId);
       if (!main) {
         const created = get().createWindow({ profileId, url: options?.url, adoptId: options?.adoptId ?? options?.wakeAdoptId, background: options?.background });
         return activeTabId(get(), created) ?? "";
       }
-      return get().newTab(main, { ...options, profileId, index: undefined });
+      return get().newTab(main, { ...options, profileId, index: undefined, ...(foreignBlank ? { openerId: undefined } : {}) });
     }
     if (options?.url && !options.adoptId && !options.enginePage && openOutsideTab(get(), resolveTyped(get().settings, options.url), windowId)) return "";
     if (options?.url && !options.adoptId && !options.gated && isGatedUrl(options.url)) {
@@ -91,7 +93,6 @@ export const createTabsSlice: StateCreator<BrowserState, [], [], TabsSlice> = (s
       });
       return id;
     }
-    const w = get().windows[windowId];
     const beside = w && options?.newTabCommand && !options.openerId ? newTabPlacement(get(), w, options.profileId) : undefined;
     let [next, id] = withNewTab(get(), windowId, beside ? { ...options, ...beside } : options);
     const typed = beside && navigationOf(next.tabs[id]);

@@ -22,7 +22,8 @@ import { parseSaved, unchanged, type Migrations, type SavedObject } from "../../
 import { sessionWithCleanUpMinutes } from "../settings/cleanUpAfter";
 import { parseSettingsMeta, sessionWithNewTabLinksInLittleArdia, sessionWithSettingsMeta, sessionWithUnreadCountsOffByDefault } from "../settings/settings";
 import { sessionWithOwnTabMutes } from "../tabs/mute";
-import { isRegularWindow } from "../windows/small";
+import { closedWindowOf } from "../windows/closedWindow";
+import { isBlankWindow, isRegularWindow } from "../windows/small";
 import { sessionWithPinChoiceStamps } from "../pins/pinChoices";
 import { isFields, isString, isStringList } from "../../lib/decode";
 import { pageFromDisk, pinFromDisk, splitsChecked, savedPage, sessionWithSplitSlots, sessionWithTabPages, sessionWithTabPins, slotsFromDisk } from "./savedShapes";
@@ -163,7 +164,7 @@ export function parseSession(json: string | null | undefined): SavedSession | nu
     orphanedProfileData: strings(raw.orphanedProfileData),
     settings,
     settingsMeta: parseSettingsMeta(raw.settingsMeta),
-    windows: byId(rows<Omit<BrowserWindow, "autoHideTabs"> & { incognito?: unknown; sidebarOpen?: unknown; autoHideTabs?: unknown }>(raw.windows, windowOk).map(({ incognito: _i, sidebarOpen: _s, autoHideTabs, ...w }): BrowserWindow => ({ ...w, kind: "main", ...(typeof autoHideTabs === "boolean" ? { autoHideTabs } : {}) }))),
+    windows: byId(rows<Omit<BrowserWindow, "autoHideTabs"> & { incognito?: unknown; sidebarOpen?: unknown; autoHideTabs?: unknown; blank?: unknown }>(raw.windows, windowOk).map(({ incognito: _i, sidebarOpen: _s, autoHideTabs, blank, ...w }): BrowserWindow => ({ ...w, kind: "main", ...(blank === true ? { blank } : {}), ...(typeof autoHideTabs === "boolean" ? { autoHideTabs } : {}) }))),
     windowOrder: strings(raw.windowOrder),
     focusedWindowId: nullableString(raw.focusedWindowId),
     lastProfileId: nullableString(raw.lastProfileId),
@@ -234,8 +235,9 @@ function closedForLaunch(session: SavedSession): HydrateData {
   const closedWindows = [
     ...(session.closedWindows ?? []).filter((c) => c.tabs.length).map(({ lastWindow: _, activePin: __, ...c }) => c),
     ...Object.values(session.windows)
-      .map((w) =>
-        closedWindowEntry(
+      .map((w) => isBlankWindow(w)
+        ? closedWindowOf(pinSource, w, w.tabIds.map((id) => session.tabs[id]).filter((t): t is Tab => !!t), false)
+        : closedWindowEntry(
           w,
           w.tabIds
             .map((id) => session.tabs[id])

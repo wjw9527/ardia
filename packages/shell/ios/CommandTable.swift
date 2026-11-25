@@ -4,6 +4,7 @@ enum CommandTable {
   enum Command: String {
     case newTab
     case newWindow
+    case newBlankWindow
     case newIncognitoWindow
     case newLittleArdia
     case toggleOpenLinksInLittleArdia
@@ -120,6 +121,7 @@ enum CommandTable {
   static let titles: [String: String] = [
     "newTab": "New Tab",
     "newWindow": "New Window",
+    "newBlankWindow": "Blank Window",
     "newIncognitoWindow": "New Incognito Window",
     "newLittleArdia": "New Little Ardia Window",
     "toggleOpenLinksInLittleArdia": "Open Links from Other Apps in Main Window",

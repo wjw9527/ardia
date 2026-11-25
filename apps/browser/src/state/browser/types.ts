@@ -42,7 +42,7 @@ type WindowBase = {
 };
 
 export type BrowserWindow =
-  | (WindowBase & { kind: "main"; chromeWindow?: string; opensBehind?: string })
+  | (WindowBase & { kind: "main"; chromeWindow?: string; opensBehind?: string; blank?: true })
   | (WindowBase & { kind: "private"; chromeWindow?: string })
   | (WindowBase & { kind: "small"; linkPointer?: [number, number]; linkApp?: string });
 
@@ -175,7 +175,7 @@ export type ClosedTab = {
 export type ClosedWindow = {
   kind: "window";
   id: string;
-  window: Pick<BrowserWindow, "profileId" | "frame" | "restoredFrame" | "maximized" | "tabLayout" | "autoHideTabs">;
+  window: Pick<MainWindow, "profileId" | "frame" | "restoredFrame" | "maximized" | "tabLayout" | "autoHideTabs" | "blank">;
   tabs: (TabSnapshot & { active: boolean; tabId?: string })[];
   groups: (Omit<TabGroup, "tabIds" | "windowId" | "shownTabIds"> & { tabIndexes: number[] })[];
   splits?: Pick<SplitView, "orientation" | "slots">[];

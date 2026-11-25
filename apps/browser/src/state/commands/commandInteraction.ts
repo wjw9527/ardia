@@ -5,6 +5,7 @@ export type CommandInteraction = "quiet" | "interactive" | "asksWhen";
 export const COMMAND_INTERACTION: Readonly<Record<BrowserCommand, CommandInteraction>> = {
   newTab: "quiet",
   newWindow: "quiet",
+  newBlankWindow: "quiet",
   newIncognitoWindow: "quiet",
   newLittleArdia: "quiet",
   toggleOpenLinksInLittleArdia: "quiet",

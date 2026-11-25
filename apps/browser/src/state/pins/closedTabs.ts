@@ -5,6 +5,7 @@ import { pendingRestore, restoreId } from "../tabs/adoptIds";
 import { activated, apply, removeTabs, withNewTab } from "../tabs/tabs";
 import { groupLabel, withGroup } from "./tabGrouping";
 import type { BrowserWindow, ClosedGroup, ClosedTab, ClosedWindow, NestedGroupSnapshot, Tab, TabGroup } from "../browser/types";
+import { isBlankWindow } from "../windows/small";
 import { isAsleep } from "../tabs/pageSession";
 
 export const MAX_CLOSED_TABS = 50;
@@ -41,7 +42,7 @@ export function closedTabEntry(s: Pick<BrowserState, "groups">, t: Tab, at: { wi
 export const closedWindowEntry = (w: BrowserWindow, tabs: ClosedWindow["tabs"], groups: ClosedWindow["groups"], closedAt: number): ClosedWindow => ({
   kind: "window",
   id: newId("cw"),
-  window: { profileId: w.profileId, frame: w.frame, ...(w.restoredFrame ? { restoredFrame: w.restoredFrame } : {}), ...(w.maximized ? { maximized: true } : {}), ...(w.tabLayout ? { tabLayout: w.tabLayout } : {}), ...(w.autoHideTabs !== undefined ? { autoHideTabs: w.autoHideTabs } : {}) },
+  window: { profileId: w.profileId, frame: w.frame, ...(w.restoredFrame ? { restoredFrame: w.restoredFrame } : {}), ...(w.maximized ? { maximized: true } : {}), ...(w.tabLayout ? { tabLayout: w.tabLayout } : {}), ...(w.autoHideTabs !== undefined ? { autoHideTabs: w.autoHideTabs } : {}), ...(w.kind === "main" && w.blank ? { blank: true } : {}) },
   tabs,
   groups,
   closedAt,
@@ -179,8 +180,11 @@ export function regroupRestored(s: BrowserState, windowId: string, entries: Clos
   return { ...s, windows: { ...s.windows, [windowId]: window }, groups: syncGroupOrder(groups, window) };
 }
 
-export function restoreTarget(s: BrowserState, original: string, requested?: string | null): string | undefined {
-  const ok = (id: string | null | undefined) => !!id && !!s.windows[id] && s.windows[id]!.kind !== "private";
+export function restoreTarget(s: BrowserState, original: string, requested?: string | null, profileId?: string): string | undefined {
+  const ok = (id: string | null | undefined) => {
+    const w = id ? s.windows[id] : undefined;
+    return !!w && w.kind !== "private" && (!isBlankWindow(w) || w.profileId === profileId);
+  };
   if (ok(original)) return original;
   if (ok(requested)) return requested!;
   return s.ui.focusOrder.find((id) => ok(id)) ?? s.windowOrder.find((id) => ok(id));
@@ -197,7 +201,7 @@ function atSavedIndex(s: BrowserState, windowId: string, block: string[], index:
 }
 
 export function restoringGroup(s: BrowserState, entry: ClosedGroup, requested?: string | null): BrowserState {
-  const windowId = restoreTarget(s, entry.windowId, requested);
+  const windowId = restoreTarget(s, entry.windowId, requested, entry.tabs[0]?.profileId);
   if (!windowId) return s;
   let next: BrowserState = {
     ...s,

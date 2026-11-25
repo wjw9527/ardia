@@ -5,7 +5,7 @@ import { pendingRestore, restoreId } from "../tabs/adoptIds";
 import type { BrowserWindow, HistoryEntry, ParkedPins, Tab, TabGroup } from "../browser/types";
 import { samePage } from "../../lib/url";
 import { historyOf } from "../history/history";
-import { isRegularWindow } from "../windows/small";
+import { isBlankWindow, isSharedWindow } from "../windows/small";
 import { ASLEEP, withWake } from "../tabs/pageSession";
 import { mapSlotIds, slotTabIds, splitOf, splitTabIds } from "../splits/splits";
 
@@ -22,7 +22,7 @@ function atPin(t: Tab, history: HistoryEntry[]): Partial<Pick<Tab, "url" | "titl
 const homeOf = (t: { url: string; pinnedUrl?: string | null }) => t.pinnedUrl || t.url;
 
 export function parkWindowPins(parked: Record<string, ParkedPins>, w: BrowserWindow, s: PinSource): Record<string, ParkedPins> {
-  if (w.kind === "private") return parked;
+  if (w.kind === "private" || isBlankWindow(w)) return parked;
   const own = Object.values(s.groups).filter((g) => g.pinned && g.windowId === w.id);
   const ownIds = new Set(own.map((g) => g.id));
   const groupOf = new Map<string, TabGroup>();
@@ -30,7 +30,7 @@ export function parkWindowPins(parked: Record<string, ParkedPins>, w: BrowserWin
   let next = parked;
   const profiles = new Set(w.tabIds.map((id) => s.tabs[id]?.profileId).filter((p): p is string => !!p));
   const shownElsewhere = (profileId: string) =>
-    Object.values(s.windows ?? {}).some((o) => o.id !== w.id && isRegularWindow(o) && o.tabIds.some((id) => s.tabs[id]?.profileId === profileId));
+    Object.values(s.windows ?? {}).some((o) => o.id !== w.id && isSharedWindow(o) && o.tabIds.some((id) => s.tabs[id]?.profileId === profileId));
   for (const profileId of profiles) {
     if (shownElsewhere(profileId)) continue;
     const own = w.tabIds.map((id) => s.tabs[id]).filter((t): t is Tab => !!t && t.profileId === profileId);
@@ -81,7 +81,7 @@ export function parkWindowPins(parked: Record<string, ParkedPins>, w: BrowserWin
 export function adoptParkedPins(s: BrowserState, windowId: string, profileId: string): BrowserState {
   const park = s.parkedPins[profileId];
   const w = s.windows[windowId];
-  if (!park || !w || w.kind === "private" || !s.profiles[profileId]) return s;
+  if (!park || !w || w.kind === "private" || isBlankWindow(w) || !s.profiles[profileId]) return s;
   const tabs = { ...s.tabs };
   const held = new Map(w.tabIds.map((id) => tabs[id]).filter((t): t is Tab => !!t?.pin && t.profileId === profileId).map((t) => [pinKeyOf(t), t.id]));
   const keyOf = new Map<string, string>();
@@ -140,6 +140,6 @@ export function adoptParkedPins(s: BrowserState, windowId: string, profileId: st
   }
   const window = { ...w, tabIds: orderSections(order, tabs, groups) };
   groups = syncGroupOrder(groups, window);
-  const closedWindows = s.closedWindows.filter((c) => c.tabs.length || c.window.profileId !== profileId);
+  const closedWindows = s.closedWindows.filter((c) => c.window.blank || c.tabs.length || c.window.profileId !== profileId);
   return { ...s, tabs, groups, splits, windows: { ...s.windows, [windowId]: window }, parkedPins: without(s.parkedPins, [profileId]), closedWindows };
 }

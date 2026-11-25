@@ -4,6 +4,8 @@ import { ClipView, ContextMenuArea, space, WindowDragRegion } from "../ui";
 import { layout, useTheme } from "../ui/theme";
 import { useSidebarHighContrast } from "../../state/sidebar/textLook";
 import { TintInk } from "../ui/TintInk";
+import { useBrowser } from "../../state/browser/store";
+import { isBlankWindow } from "../../state/windows/small";
 import { useWindowId, useWindowProfileId } from "../../state/browser/hooks";
 import { useHasDownloads, useNoTiles } from "../../state/sidebar/hooks";
 import { collapsedSidebarHeader, useAddressBarInSidebar, useDownloadsInSidebarFooter, usePageFrameInset, useSidebarCaptionRoom, useSidebarHeaderCollapsed, useToolbarLightsCenter } from "../../state/windows/layout";
@@ -56,7 +58,8 @@ export function Sidebar({ width }: { width: number }) {
   const header = collapsed && field !== "top" ? collapsedSidebarHeader(frame) : sidebarHeaderOf(addressBar, lightsY, field === "top");
   const downloadsShown = useSidebarPart("downloads");
   const hasDownloads = useHasDownloads(windowId) && downloadsShown;
-  const profileShown = useSidebarPart("profile");
+  const blank = useBrowser((s) => isBlankWindow(s.windows[windowId]));
+  const profileShown = useSidebarPart("profile") && !blank;
   const dotsWanted = useProfileDotsShown();
   const dots = dotsWanted && profileShown;
   const footerDownloads = useDownloadsInSidebarFooter() && hasDownloads;

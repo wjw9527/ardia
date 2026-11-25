@@ -263,6 +263,46 @@ function pinnedWindow() {
 }
 const PINS = ["https://mail.com", "https://docs.com", "Work/https://jira.com", "Work/https://wiki.com"];
 
+test("blank windows keep the profile but do not share tabs, pins, or parked pins", () => {
+  stub.docs.clear();
+  reset();
+  const stop = startPersistence();
+  try {
+    S().updateSettings({ shareTabsAcrossWindows: true });
+    const { w } = pinnedWindow();
+    const profileId = S().windows[w].profileId;
+    const blank = S().createWindow({ profileId, blank: true });
+    assert.equal(S().windows[blank].profileId, profileId);
+    assert.deepEqual(view(blank), [""]);
+    const local = S().newTab(blank, { url: "https://blank-only.com" });
+    assert.equal(view(w).includes("https://blank-only.com"), false);
+    S().togglePin(local);
+    const normal = S().createWindow({ profileId });
+    assert.deepEqual(sidebar(normal), PINS);
+    assert.equal(view(normal).includes("https://a.com"), true);
+    assert.equal(view(normal).includes("https://blank-only.com"), false);
+    assert.deepEqual(sidebar(blank).map((title) => title.split(" (loaded)")[0]), ["https://blank-only.com"]);
+
+    S().closeWindow(w);
+    S().closeWindow(normal);
+    assert.deepEqual(S().parkedPins[profileId].tabs.map((t) => t.url), PINS.map((title) => title.replace("Work/", "")));
+    assert.equal(view(blank).includes("https://a.com"), false);
+    flushPersistence();
+    S().hydrate(loadSession());
+    assert.equal(S().windows[blank].blank, true);
+    assert.deepEqual(sidebar(blank).map((title) => title.split(" (loaded)")[0]), ["https://blank-only.com"]);
+
+    S().closeWindow(blank);
+    S().reopenClosedWindow();
+    const reopened = S().ui.focusOrder[0];
+    assert.equal(S().windows[reopened].blank, true);
+    assert.deepEqual(sidebar(reopened).map((title) => title.split(" (loaded)")[0]), ["https://blank-only.com"]);
+    assert.deepEqual(sidebar(S().createWindow({ profileId })), PINS);
+  } finally {
+    stop();
+  }
+});
+
 test("⌘W until the window closes, then ⌘N: the pinned tabs and pinned groups are back, in order, unloaded", () => {
   reset();
   const { w, mail, work } = pinnedWindow();

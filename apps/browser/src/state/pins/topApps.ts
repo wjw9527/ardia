@@ -2,7 +2,7 @@ import type { BrowserState } from "../browser/store";
 import { isPinnedRow, makeTab, pinKeyOf, pinSection, snapshotTab, TILE_PIN } from "../browser/model";
 import type { ParkedPins, Tab } from "../browser/types";
 import { dataGroups, dataIdOf, sharingProfiles } from "../profiles/profiles";
-import { isRegularWindow } from "../windows/small";
+import { isSharedWindow } from "../windows/small";
 import { writingFromSync } from "./syncWrites";
 import { noteTopAppsSharing, sharingStartedBySync } from "../telemetry/topAppsSharing";
 import { conform, pinnedGroupsOf, pinsMayDiffer, profilesOf, sectionOf, tileSig, union, type Item, type Section } from "./pinMirror";
@@ -126,7 +126,7 @@ function withChange(target: Item[], before: Item[], after: Item[], blocked: Set<
   return out;
 }
 
-const shownAnywhere = (s: BrowserState, p: string) => Object.values(s.windows).some((w) => isRegularWindow(w) && profilesOf(s, w).has(p));
+const shownAnywhere = (s: BrowserState, p: string) => Object.values(s.windows).some((w) => isSharedWindow(w) && profilesOf(s, w).has(p));
 
 function keepEmptiedParks(s: BrowserState, prev: BrowserState, circles: string[][]): BrowserState | null {
   if (s.parkedPins === prev.parkedPins) return null;
@@ -147,7 +147,7 @@ export function mirrorTopApps(s: BrowserState, prev: BrowserState): BrowserState
   const kept = writingFromSync() ? keepEmptiedParks(recorded, prev, circles) : null;
   if (!joining.size && (kept || writingFromSync())) return kept ?? onlyRecorded;
   if (!joining.size && !pinsMayDiffer(s, prev) && s.parkedPins === prev.parkedPins) return onlyRecorded;
-  const order = [...new Set([...s.ui.focusOrder, ...s.windowOrder])].filter((id) => isRegularWindow(s.windows[id]));
+  const order = [...new Set([...s.ui.focusOrder, ...s.windowOrder])].filter((id) => isSharedWindow(s.windows[id]));
   const prevGroups = pinnedGroupsOf(prev);
   const hadPlace = (p: string) => shownAnywhere(prev, p);
   let next: BrowserState = kept ?? recorded;
@@ -179,13 +179,13 @@ export function mirrorTopApps(s: BrowserState, prev: BrowserState): BrowserState
     if (new Set(sigs).size === 1) continue;
     const sectionBefore = ({ window: w, profileId: p }: Member): Section => {
       const before = w ? prev.windows[w] : undefined;
-      return isRegularWindow(before) && profilesOf(prev, before).has(p) ? sectionOf(prev, before, p, prevGroups) : parkedSection(prev, p);
+      return isSharedWindow(before) && profilesOf(prev, before).has(p) ? sectionOf(prev, before, p, prevGroups) : parkedSection(prev, p);
     };
     const wasParked = (p: string) => (!hadPlace(p) && prev.parkedPins[p] ? topAppSig(parkedSection(prev, p)) : null);
     const was = ({ window: w, profileId: p }: Member) => {
       if (!w) return hadPlace(p) || !prev.parkedPins[p] ? null : topAppSig(parkedSection(prev, p));
       const before = prev.windows[w];
-      return isRegularWindow(before) && profilesOf(prev, before).has(p) ? topAppSig(sectionOf(prev, before, p, prevGroups)) : wasParked(p);
+      return isSharedWindow(before) && profilesOf(prev, before).has(p) ? topAppSig(sectionOf(prev, before, p, prevGroups)) : wasParked(p);
     };
     const source = turnedOn
       ? -1
