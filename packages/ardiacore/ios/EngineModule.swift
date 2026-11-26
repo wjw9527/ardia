@@ -28,7 +28,13 @@ public class EngineModule: Module {
     "beginTracing": { _, reply in ArdiaHost.beginTracing { reply.ok($0) } },
     "endTracing": { args, reply in ArdiaHost.endTracing(keep: try args.bool("keep")) { reply.ok($0) } },
     "isTracing": { _, reply in reply.ok(ArdiaHost.isTracing) },
-    "systemState": { _, reply in reply.ok(SystemState.shared.snapshot) },
+    "systemState": { args, reply in
+      if try args.optionalBool("measureAppMemory") == true {
+        SystemState.shared.snapshotWithAppMemory { reply.ok($0) }
+      } else {
+        reply.ok(SystemState.shared.snapshot)
+      }
+    },
     "batterySaver": EngineCall.passing("ac_battery_saver"),
     "memorySaver": EngineCall.passing("ac_memory_saver"),
     "validateKeepActiveSite": { args, reply in

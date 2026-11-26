@@ -8,6 +8,8 @@ final class SystemState {
   private var memorySource: DispatchSourceMemoryPressure?
   private var powerSource: CFRunLoopSource?
   private var lowPowerObserver: NSObjectProtocol?
+  private let appMemoryLimitBytes = SystemState.configuredAppMemoryLimit()
+  private var memorySampleReplies: [([String: Any]) -> Void] = []
 
   var snapshot: [String: Any] {
     let battery = SystemState.battery()
@@ -18,6 +20,40 @@ final class SystemState {
       "memoryPressure": memoryPressure,
       "physicalMemory": Double(ProcessInfo.processInfo.physicalMemory),
     ]
+  }
+
+  func snapshotWithAppMemory(_ completion: @escaping ([String: Any]) -> Void) {
+    memorySampleReplies.append(completion)
+    guard memorySampleReplies.count == 1 else { return }
+    DispatchQueue.global(qos: .utility).async {
+      let bytes = ArdiaHost.applicationMemoryFootprint()?.doubleValue
+      DispatchQueue.main.async {
+        var state = self.snapshot
+        if let bytes {
+          state["appMemoryBytes"] = bytes
+          state["appMemoryLimitBytes"] = self.appMemoryLimitBytes
+        }
+        let replies = self.memorySampleReplies
+        self.memorySampleReplies.removeAll()
+        for reply in replies { reply(state) }
+      }
+    }
+  }
+
+  private static func configuredAppMemoryLimit() -> Double {
+    let key = "ACAppMemoryLimitMiB"
+    let bytesPerMiB: UInt64 = 1024 * 1024
+    func mib(_ value: Any?) -> UInt64? {
+      guard let number = value as? NSNumber,
+        CFGetTypeID(number) != CFBooleanGetTypeID(),
+        ["c", "s", "i", "l", "q", "C", "S", "I", "L", "Q"].contains(String(cString: number.objCType)),
+        let limit = UInt64(number.stringValue),
+        limit > 0, limit <= 9_007_199_254_740_991 / bytesPerMiB
+      else { return nil }
+      return limit
+    }
+    let limit = mib(UserDefaults.standard.object(forKey: key)) ?? mib(Bundle.main.object(forInfoDictionaryKey: key)) ?? 8192
+    return Double(limit * bytesPerMiB)
   }
 
   func start() {

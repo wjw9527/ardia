@@ -5,6 +5,7 @@ export type { EngineTask, HoverLostEpisode, MemorySaverMode, PressLoopLongReport
 
 export const listTasks = () => call("engine.tasks");
 export const systemState = () => call("engine.systemState");
+export const sampleAppMemory = () => call("engine.systemState", { measureAppMemory: true });
 export const onSystemState = (listener: (state: SystemState) => void) => on("engine.systemState", listener);
 export const onHoverLost = (listener: (episode: HoverLostEpisode) => void) => on("engine.hoverLost", listener);
 export const onPopupProtectedMedia = (listener: (media: PopupProtectedMedia) => void) => on("engine.popupProtectedMedia", listener);

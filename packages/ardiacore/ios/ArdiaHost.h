@@ -82,4 +82,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+@interface ArdiaHost (Memory)
++ (nullable NSNumber *)applicationMemoryFootprint NS_SWIFT_NAME(applicationMemoryFootprint());
+@end
+
 NS_ASSUME_NONNULL_END

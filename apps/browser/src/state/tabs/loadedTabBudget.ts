@@ -1,8 +1,10 @@
-import type { SystemState } from "../../platform/performance";
+import { sampleAppMemory, type SystemState } from "../../platform/performance";
 import { everySlowly } from "../../platform/slowTimers";
 import { webviews } from "../../platform/webviews";
 import { withDeadline } from "../../lib/deadline";
 import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
+import { PLATFORM_IDS } from "../../lib/platformTerms";
+import { isQuitting } from "../app/quit";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { tabEngine } from "../engines/engines";
 import { isPlaying, useMedia } from "../media/media";
@@ -18,10 +20,14 @@ import { isSleeping } from "./sleepingTabs";
 import { liveOf } from "./tabLive";
 
 export type LoadedTabBudget = { tabs: number; hiddenMs: number };
+type AppMemoryReading = Pick<SystemState, "appMemoryBytes" | "appMemoryLimitBytes">;
 
 const MINUTE = 60_000;
 const GIB = 2 ** 30;
 const SWEEP_MS = MINUTE;
+const APP_MEMORY_SWEEP_MS = 15_000;
+const APP_MEMORY_SAMPLE_DEADLINE_MS = 3000;
+const APP_MEMORY_BUDGET: LoadedTabBudget = { tabs: 0, hiddenMs: 30_000 };
 const MODES: Record<Settings["memorySaverMode"], { floor: number; perGib: number; hiddenMs: number }> = {
   moderate: { floor: 20, perGib: 2, hiddenMs: 120 * MINUTE },
   balanced: { floor: 10, perGib: 1, hiddenMs: 60 * MINUTE },
@@ -57,6 +63,15 @@ export function inUse(s: BrowserState, id: string): boolean {
 
 const awakeOf = (s: BrowserState, loaded: Iterable<string>) => [...loaded].filter((id) => s.tabs[id] && hasPage(s.tabs[id]!) && !isSleeping(id));
 
+function protectedTabs(s: BrowserState) {
+  return new Set(withSharedFamily(s, withPinnedPanes(s, [...shownTabIds(s)])));
+}
+
+function canSleep(s: BrowserState, id: string, shown: ReadonlySet<string>) {
+  const tab = s.tabs[id];
+  return !!tab && hasPage(tab) && !isSleeping(id) && !shown.has(id) && tabEngine(s, id) === "chromium" && /^https?:\/\//i.test(tab.url) && !inUse(s, id);
+}
+
 export function tabsOverBudget(
   s: BrowserState,
   loaded: Iterable<string>,
@@ -68,19 +83,16 @@ export function tabsOverBudget(
 ): string[] {
   const awake = awakeOf(s, loaded);
   if (awake.length <= budget.tabs) return [];
-  const shown = new Set(withSharedFamily(s, withPinnedPanes(s, [...shownTabIds(s)])));
+  const shown = protectedTabs(s);
   const lastSeen = (id: string) => (shown.has(id) ? now : Math.max(s.tabs[id]!.lastActiveAt, seenAt.get(id) ?? 0));
   return awake
     .sort((a, b) => lastSeen(b) - lastSeen(a))
     .slice(budget.tabs)
     .filter(
       (id) =>
-        !shown.has(id) &&
+        canSleep(s, id, shown) &&
         now - lastSeen(id) >= budget.hiddenMs &&
         (askAgainAt.get(id) ?? 0) <= now &&
-        tabEngine(s, id) === "chromium" &&
-        /^https?:\/\//i.test(s.tabs[id]!.url) &&
-        !inUse(s, id) &&
         !(liveOf(id).isLoading && skippedLoading.push(id)),
     )
     .reverse();
@@ -92,8 +104,20 @@ const sleptAt = new Map<string, number>();
 const keptAt = new Map<string, number>();
 let sweeping = false;
 
-export async function sleepTabsOverBudget(budget: LoadedTabBudget | null, now = Date.now()): Promise<string[]> {
-  if (!budget || sweeping) return [];
+export function sleepTabsOverBudget(budget: LoadedTabBudget | null, now = Date.now()): Promise<string[]> {
+  return budget ? sleepEligibleTabs(budget, now) : Promise.resolve([]);
+}
+
+export function sleepTabsOverAppMemory(readMemory: () => Promise<AppMemoryReading | null> = sampleAppMemory, now = Date.now()): Promise<string[]> {
+  return sleepEligibleTabs(APP_MEMORY_BUDGET, now, async () => {
+    const sample = await withDeadline(Promise.resolve().then(readMemory).catch(() => null), APP_MEMORY_SAMPLE_DEADLINE_MS, null);
+    const { appMemoryBytes: used, appMemoryLimitBytes: limit } = sample ?? {};
+    return typeof used === "number" && typeof limit === "number" && Number.isSafeInteger(used) && Number.isSafeInteger(limit) && limit > 0 && used > limit;
+  });
+}
+
+async function sleepEligibleTabs(budget: LoadedTabBudget, now: number, shouldSleep?: () => Promise<boolean>): Promise<string[]> {
+  if (sweeping || isQuitting()) return [];
   const s = useBrowser.getState();
   for (const id of shownTabIds(s)) seenAt.set(id, now);
   for (const id of seenAt.keys()) if (!s.tabs[id]) seenAt.delete(id);
@@ -102,19 +126,25 @@ export async function sleepTabsOverBudget(budget: LoadedTabBudget | null, now = 
   const skippedLoading: string[] = [];
   const candidates = tabsOverBudget(s, webviews.keys(), budget, now, seenAt, askAgainAt, skippedLoading);
   const asking = [...candidates.filter((id) => !keptAt.has(id)), ...candidates.filter((id) => keptAt.has(id))].slice(0, SLEEPS_PER_SWEEP);
-  noteBudgetSweep(skippedLoading.length, candidates.slice(0, SLEEPS_PER_SWEEP).filter((id) => !asking.includes(id)).length);
+  if (shouldSleep && !asking.length) return [];
   const slept: string[] = [];
-  const consent = consentToken();
   sweeping = true;
   try {
-    for (const id of asking) {
-      const asked = Promise.resolve(webviews.get(id)?.sleepIfHidden(budget.hiddenMs / 1000)).catch(() => undefined);
+    if (shouldSleep && !(await shouldSleep())) return [];
+    noteBudgetSweep(skippedLoading.length, candidates.slice(0, SLEEPS_PER_SWEEP).filter((id) => !asking.includes(id)).length);
+    const consent = consentToken();
+    for (const [index, id] of asking.entries()) {
+      if (isQuitting()) break;
+      const latest = useBrowser.getState();
+      if (!canSleep(latest, id, protectedTabs(latest)) || liveOf(id).isLoading) continue;
+      const asked = Promise.resolve().then(() => webviews.get(id)?.sleepIfHidden(budget.hiddenMs / 1000)).catch(() => undefined);
       const keptBy = await withDeadline(asked, ANSWER_WITHIN_MS, undefined);
       if (keptBy?.length === 0) {
         slept.push(id);
         sleptAt.set(id, now);
         keptAt.delete(id);
         noteTabSleptOverBudget(consent);
+        if (shouldSleep && index + 1 < asking.length && !(await shouldSleep())) break;
       } else if (keptBy?.includes(RECENTLY_VISIBLE)) seenAt.set(id, now);
       else {
         askAgainAt.set(id, now + ASK_AGAIN_MS);
@@ -148,6 +178,10 @@ export function startLoadedTabBudget(system: () => SystemState | null) {
     every: SWEEP_MS,
     run: () => void sleepTabsOverBudget(budget()),
     needed: () => awakeOf(useBrowser.getState(), webviews.keys()).length > (budget()?.tabs ?? Infinity),
+  });
+  if (PLATFORM_IDS.report === "macos") everySlowly({
+    every: APP_MEMORY_SWEEP_MS,
+    run: () => void sleepTabsOverAppMemory(),
   });
   if (__DEV__) (globalThis as { acLoadedTabBudget?: unknown }).acLoadedTabBudget = { sleepTabsOverBudget, budget, tabsOverBudget };
 }

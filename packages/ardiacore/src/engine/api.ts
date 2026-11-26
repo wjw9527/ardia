@@ -34,7 +34,7 @@ export type EngineCalls = {
   "engine.beginTracing": [{}, boolean];
   "engine.endTracing": [{ keep: boolean }, string | null];
   "engine.isTracing": [{}, boolean];
-  "engine.systemState": [{}, SystemState];
+  "engine.systemState": [{ measureAppMemory?: boolean }, SystemState];
   "engine.batterySaver": [{ mode: BatterySaverMode }, BatterySaverState];
   "engine.memorySaver": [MemorySaverRequest, MemorySaverState];
   "engine.validateKeepActiveSite": [{ site: string }, { valid: boolean }];

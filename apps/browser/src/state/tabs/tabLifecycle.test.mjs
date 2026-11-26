@@ -344,3 +344,71 @@ test("tabs the engine kept give their asks to tabs not kept yet, so a sweep wher
   assert.equal(takeTabSleepCounts().tabs_over_budget_asks_passed_on, 1, "one ask went from a kept tab to a tab not kept yet");
   webviews.clear();
 });
+
+test("the app memory limit sleeps four eligible background tabs at a time only above a fresh threshold", async () => {
+  const { sleepTabsOverAppMemory } = await import("./loadedTabBudget.ts");
+  const { webviews } = await import("../../platform/webviews.ts");
+  const now = Date.now() + 360 * 60 * minute;
+  const { ids } = windowOfHiddenTabs(8, now);
+  S().updateSettings({ memorySaver: false });
+  const second = S().createWindow({ url: "https://other-active.example/" });
+  const other = S().windows[second].tabIds[0];
+  assert.ok(S().openSplitPane(second, { anchorTabId: other, url: "https://other-pane.example/" }).ok);
+  S().updateTab(other, { lastActiveAt: now - 100 * minute });
+  S().updateLive(ids[7], { playingAudio: true });
+  S().updateLive(ids[6], { isLoading: true });
+  const asked = [];
+  webviews.clear();
+  try {
+    for (const id of Object.keys(S().tabs)) webviews.set(id, {
+      sleepIfHidden: async () => {
+        asked.push(id);
+        if (id === ids[5]) return [26];
+        lifecycle.noteDiscarded(id);
+        return [];
+      },
+    });
+    const limit = 8 * 2 ** 30;
+    const sample = (used) => async () => ({ appMemoryBytes: used, appMemoryLimitBytes: limit });
+    assert.deepEqual(await sleepTabsOverAppMemory(async () => null, now), []);
+    assert.deepEqual(await sleepTabsOverAppMemory(sample(NaN), now), []);
+    assert.deepEqual(await sleepTabsOverAppMemory(sample(limit), now), []);
+    assert.deepEqual(asked, []);
+    assert.deepEqual(await sleepTabsOverAppMemory(sample(limit + 1), now), [ids[4], ids[3], ids[2]]);
+    assert.deepEqual(asked, [ids[5], ids[4], ids[3], ids[2]]);
+    assert.deepEqual(await sleepTabsOverAppMemory(sample(limit - 1), now + minute), []);
+    assert.deepEqual(asked, [ids[5], ids[4], ids[3], ids[2]]);
+    const readings = [limit + 1, limit - 1];
+    const readMemory = async () => ({ appMemoryBytes: readings.shift(), appMemoryLimitBytes: limit });
+    assert.deepEqual(await sleepTabsOverAppMemory(readMemory, now + 2 * minute), [ids[1]]);
+    assert.deepEqual(readings, []);
+    assert.deepEqual(asked, [ids[5], ids[4], ids[3], ids[2], ids[1]]);
+  } finally {
+    webviews.clear();
+  }
+});
+
+test("an in-flight app memory sweep blocks the ordinary sweep and skips newly active or discarded tabs", async () => {
+  const { sleepTabsOverAppMemory, sleepTabsOverBudget } = await import("./loadedTabBudget.ts");
+  const { webviews } = await import("../../platform/webviews.ts");
+  const now = Date.now() + 480 * 60 * minute;
+  const { ids, active } = windowOfHiddenTabs(3, now);
+  const asked = [];
+  webviews.clear();
+  try {
+    for (const id of [active, ...ids]) webviews.set(id, {
+      sleepIfHidden: async () => (asked.push(id), []),
+    });
+    let resolveSample;
+    const sample = new Promise((resolve) => (resolveSample = resolve));
+    const sweep = sleepTabsOverAppMemory(() => sample, now);
+    assert.deepEqual(await sleepTabsOverBudget({ tabs: 0, hiddenMs: 0 }, now), []);
+    S().activate(ids[1]);
+    lifecycle.noteDiscarded(ids[2]);
+    resolveSample({ appMemoryBytes: 9 * 2 ** 30, appMemoryLimitBytes: 8 * 2 ** 30 });
+    assert.deepEqual(await sweep, [ids[0]]);
+    assert.deepEqual(asked, [ids[0]]);
+  } finally {
+    webviews.clear();
+  }
+});

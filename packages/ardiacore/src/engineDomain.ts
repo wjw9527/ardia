@@ -42,6 +42,8 @@ export type SystemState = {
   lowPowerMode: boolean;
   memoryPressure: "normal" | "warning" | "critical";
   physicalMemory: number;
+  appMemoryBytes?: number;
+  appMemoryLimitBytes?: number;
 };
 
 export const WIDEVINE_COMPONENT_ID = "oimompecagnajdejgnnjijobebaeigek";
