@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 0b0291f303dbed832d9a52c990b464a220522c3d
+          ref: b3d4f599614f6251cdd723f3fd0da2dcd3c1ed41
           persist-credentials: false
       - name: Verify runner
         run: |
@@ -55,7 +55,8 @@ jobs:
             src/state/session/session.test.mjs \
             src/state/windows/profilePager.test.mjs \
             src/state/session/sessionSplits.test.mjs \
-            src/state/windows/windowSync.test.mjs
+            src/state/windows/windowSync.test.mjs \
+            src/state/tabs/tabLifecycle.test.mjs
       - name: Install CocoaPods
         working-directory: apps/browser/macos
         run: pod install
