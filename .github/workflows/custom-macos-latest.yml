@@ -1,4 +1,4 @@
-name: Custom macOS ARM64 - Blank Window
+name: Custom macOS ARM64 - Latest
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: b7393b9c4a116aee4a217ee9d2d9fab17b6c7159
+          ref: 0b0291f303dbed832d9a52c990b464a220522c3d
           persist-credentials: false
       - name: Verify runner
         run: |
@@ -43,7 +43,7 @@ jobs:
           engine="$(engine/engine-key.sh)"
           framework="$(packages/ardiacore/scripts/fetch-engine.sh)"
           printf 'ARDIACORE_FRAMEWORK=%s\nARDIACORE_FRAMEWORK_ENGINE=%s\n' "$framework" "$engine" >> "$GITHUB_ENV"
-      - name: Check TypeScript and Blank Window tests
+      - name: Check TypeScript and custom browser tests
         working-directory: apps/browser
         run: |
           pnpm typecheck
@@ -53,7 +53,9 @@ jobs:
             src/state/commands/windowsKeys.test.mjs \
             src/state/drag/windowDrop.test.mjs \
             src/state/session/session.test.mjs \
-            src/state/windows/profilePager.test.mjs
+            src/state/windows/profilePager.test.mjs \
+            src/state/session/sessionSplits.test.mjs \
+            src/state/windows/windowSync.test.mjs
       - name: Install CocoaPods
         working-directory: apps/browser/macos
         run: pod install
@@ -73,13 +75,13 @@ jobs:
           mkdir -p "$stage" "$RUNNER_TEMP/ardia-output"
           ditto "$app" "$stage/Ardia.app"
           ln -s /Applications "$stage/Applications"
-          hdiutil create -volname Ardia -srcfolder "$stage" -format UDZO "$RUNNER_TEMP/ardia-output/Ardia-0.2.48-blank-window-arm64.dmg"
+          hdiutil create -volname Ardia -srcfolder "$stage" -format UDZO "$RUNNER_TEMP/ardia-output/Ardia-0.2.48-custom-arm64.dmg"
           cp dist/0.2.48-rc/provenance.txt "$RUNNER_TEMP/ardia-output/"
           cd "$RUNNER_TEMP/ardia-output"
-          shasum -a 256 Ardia-0.2.48-blank-window-arm64.dmg > Ardia-0.2.48-blank-window-arm64.dmg.sha256
+          shasum -a 256 Ardia-0.2.48-custom-arm64.dmg > Ardia-0.2.48-custom-arm64.dmg.sha256
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: Ardia-0.2.48-blank-window-arm64
+          name: Ardia-0.2.48-custom-arm64
           path: ${{ runner.temp }}/ardia-output/
           if-no-files-found: error
           compression-level: 0
