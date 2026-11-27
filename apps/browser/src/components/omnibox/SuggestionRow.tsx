@@ -35,11 +35,13 @@ export function SuggestionIcon({ suggestion: s, color }: { suggestion: Suggestio
   }
 }
 
-function labels(s: Suggestion): [string, string | null] {
+function labels(s: Suggestion, dropdown: boolean): [string, string | null] {
   switch (s.kind) {
-    case "page":
-      if (s.tabId) return [s.title || displayUrl(s.url), "Switch to Tab"];
-      return s.title ? [s.title, displayUrl(s.url)] : [displayUrl(s.url), null];
+    case "page": {
+      const url = displayUrl(s.url);
+      const title = dropdown && (!s.title || s.title === s.url || s.title === url) ? "Untitled page" : s.title || url;
+      return [title, s.tabId ? "Switch to Tab" : !dropdown && s.title ? url : null];
+    }
     case "search":
       return [s.bang ? `Search ${s.engine} for ${s.query}` : s.query, null];
     case "calc":
@@ -50,6 +52,7 @@ function labels(s: Suggestion): [string, string | null] {
     case "extension":
       return [s.title, s.open === "action" ? "Open Extension" : "Extension Options"];
     case "provider": {
+      if (dropdown) return [s.title, s.subtitle || null];
       const host = displayHost(hostOf(s.url)) || displayUrl(s.url);
       return [s.title, s.subtitle ? `${host} · ${s.subtitle}` : host];
     }
@@ -66,12 +69,14 @@ export const SuggestionList = memo(function SuggestionList({
   selectedIndex,
   trailing,
   dropdown,
+  rowHeight,
   actions,
 }: {
   items: Suggestion[];
   selectedIndex: number;
   trailing: string | null;
   dropdown: boolean;
+  rowHeight: number;
   actions: RowActions;
 }) {
   if (!items.length) return null;
@@ -83,6 +88,8 @@ export const SuggestionList = memo(function SuggestionList({
           suggestion={s}
           selected={i === selectedIndex}
           trailing={i === 0 ? trailing : null}
+          height={rowHeight}
+          dropdown={dropdown}
           actions={actions}
         />
       ))}
@@ -103,16 +110,21 @@ const SuggestionRow = memo(
     suggestion: s,
     selected,
     trailing,
+    height,
+    dropdown,
     actions,
   }: {
     suggestion: Suggestion;
     selected: boolean;
     trailing: string | null;
+    height: number;
+    dropdown: boolean;
     actions: RowActions;
   }) {
     const theme = useTheme();
     const { hovered, hoverProps } = useHover();
-    const [title, accessory] = labels(s);
+    const [title, accessory] = labels(s, dropdown);
+    const titleSize = dropdown && (s.kind === "page" || s.kind === "provider") ? "body" : "title";
     const hint = trailing ?? (s.kind === "action" ? s.hint : s.kind === "provider" ? s.provider : null);
     const onRemove = isRemovable(s) ? () => actions.remove(s.url) : undefined;
     const removable = !!onRemove && (hovered || selected);
@@ -121,7 +133,7 @@ const SuggestionRow = memo(
         <Pressable onPress={() => actions.choose(s)}>
           <View
             style={{
-              height: SUGGESTION.height,
+              height,
               marginVertical: SUGGESTION.gapY,
               borderRadius: SUGGESTION.radius,
               flexDirection: "row",
@@ -132,7 +144,7 @@ const SuggestionRow = memo(
             }}
           >
             <SuggestionIcon suggestion={s} />
-            <Text lines={1} size="title" ardiaCentersCapitals style={{ flexShrink: 1 }}>
+            <Text lines={1} size={titleSize} ardiaCentersCapitals style={{ flexShrink: 1 }}>
               {title}
               {accessory ? (
                 <NativeText style={{ color: theme.textSecondary }}>
@@ -151,5 +163,5 @@ const SuggestionRow = memo(
       </View>
     );
   },
-  (a, b) => a.selected === b.selected && a.trailing === b.trailing && a.actions === b.actions && sameSuggestion(a.suggestion, b.suggestion),
+  (a, b) => a.selected === b.selected && a.trailing === b.trailing && a.height === b.height && a.dropdown === b.dropdown && a.actions === b.actions && sameSuggestion(a.suggestion, b.suggestion),
 );

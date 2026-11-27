@@ -61,7 +61,8 @@ export function useBarItems({
   useEffect(() => barFieldMarks.rows(overRows, rows.held, items.length), [overRows, rows.held]);
   const selectedIndex = Math.min(Math.max(selected, 0), items.length - 1);
   const current = items[selectedIndex];
-  const preview = !idle && selectedIndex > 0 ? (previewText(current) ?? typed) : null;
+  const canPreview = !idle && selectedIndex > 0 && !(dropdown && current?.kind === "page");
+  const preview = canPreview ? (previewText(current) ?? typed) : null;
   const previewing = preview !== null;
   const inline = useInlineCompletion(input, typed, suppressCompletion || scope ? "" : completion, preview, caret);
   const shownCompletion = previewing ? "" : inline.shown;

@@ -184,7 +184,7 @@ export function ToolbarBackdrop({ tabId }: { tabId: string }) {
   );
 }
 
-function useUrlField(tab: ToolbarTab, windowId: string, onFocus: () => void) {
+function useUrlField(tab: ToolbarTab, windowId: string, onFocus: () => void, initialText = tab.url) {
   const developerMode = useDeveloperMode(tab.url);
   const showFullUrl = useSettings((s) => s.showFullUrl);
   const insecure = usePage(tab.id, insecureLevel);
@@ -194,7 +194,7 @@ function useUrlField(tab: ToolbarTab, windowId: string, onFocus: () => void) {
   const buttonsShown = fieldButtonsShown(useSettings((s) => s.addressBarButtons), hovered);
   const openPanel = useStableHandler(() => {
     onFocus();
-    openBarFromAddress(windowId, tab.url);
+    openBarFromAddress(windowId, initialText);
   });
   const toggleSiteControls = useStableHandler(() => {
     onFocus();
@@ -276,7 +276,7 @@ export const ToolbarUrlField = memo(function ToolbarUrlField({ tab, palette, win
 
 export const SidebarUrlField = memo(function SidebarUrlField({ tab, palette, windowId, onFocus, height, accessory }: UrlFieldProps & { height: number; accessory: ReactNode }) {
   const theme = useTheme();
-  const field = useUrlField(tab, windowId, onFocus);
+  const field = useUrlField(tab, windowId, onFocus, "");
   const { insecure, hovered, popover, toggleSiteControls } = field;
   const extensionsHeld = useFieldExtensionsHeld(windowId);
   const shown = sidebarFieldButtons({ mode: useSettings((s) => s.addressBarButtons), hovered, insecure: !!insecure, extensionsHeld });
@@ -302,7 +302,7 @@ export const SidebarUrlField = memo(function SidebarUrlField({ tab, palette, win
       <ContextMenuArea style={{ flex: 1 }} onContextMenu={() => void showUrlBarMenu(tab)}>
         <Pressable onPress={field.openPanel} style={{ flex: 1, height, justifyContent: "center", paddingLeft: shown.leading ? SIDEBAR_TEXT_GAP : SIDEBAR_TEXT_ALONE }}>
           <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Text numberOfLines={1} ellipsizeMode="head" weight="medium" color={palette.text} ardiaCentersCapitals style={SHRINK}>
+            <Text numberOfLines={1} ellipsizeMode="head" color={palette.text} ardiaCentersCapitals style={SHRINK}>
               {field.host}
             </Text>
             <FadeLabel text={field.trail} fontSize={sidebarFont.body.fontSize} color={palette.secondary} fadeWidth={14} style={{ flex: 1, height: sidebarPoints(18), marginLeft: -space.xxs }} />

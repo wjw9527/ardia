@@ -78,6 +78,7 @@ export const SUGGESTION = {
   listBelow: space.xxs,
   dropdownListBelow: space.s,
   height: 36,
+  newTabHeight: 42,
   gapY: 2,
   get radius() { return radius.tile; },
   padX: 13,
