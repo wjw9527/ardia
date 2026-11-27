@@ -104,11 +104,12 @@ test("restoring multiple windows loads only the selected tab in each window", ()
   assertSplits();
 });
 
-test("the slots save as they are and read back the same", () => {
+test("the slots save as they are and read back the same", async () => {
   stub.docs.clear();
   stub.docs.set("session.json", JSON.stringify(oldDocument(6)));
   const stop = startPersistence();
   S().updateTab("b", { title: "touched" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   flushPersistence();
   stop();
   const saved = JSON.parse(stub.docs.get("session.json"));

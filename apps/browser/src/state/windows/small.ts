@@ -16,6 +16,8 @@ export const isBlankWindow = (w: BrowserWindow | undefined): boolean => isRegula
 
 export const isSharedWindow = (w: BrowserWindow | undefined): w is MainWindow => isRegularWindow(w) && !w.blank;
 
+export const sharedWindows = (s: Pick<BrowserState, "windows" | "windowOrder">) => s.windowOrder.map((id) => s.windows[id]).filter(isSharedWindow);
+
 export const isSmall = (s: Pick<BrowserState, "windows">, windowId?: string | null): boolean =>
   !!windowId && s.windows[windowId]?.kind === "small";
 

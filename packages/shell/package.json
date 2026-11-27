@@ -6,8 +6,11 @@
   "main": "src/index.tsx",
   "types": "src/index.tsx",
   "scripts": {
-    "typecheck": "tsc -p .",
-    "test": "node --test scripts/focusHandoff.test.mjs scripts/focusHandoffConsent.test.mjs scripts/consentStamps.test.mjs scripts/keyEquivalentMatch.test.mjs scripts/pluginPageData.test.mjs && swift test --scratch-path \"${TMPDIR:-/tmp}/ardia-shell-swiftpm\""
+    "typecheck": "tsrs -p .",
+    "test": "node --test scripts/focusHandoff.test.mjs scripts/focusHandoffConsent.test.mjs scripts/consentStamps.test.mjs scripts/keyEquivalentMatch.test.mjs scripts/pluginPageData.test.mjs scripts/windowMove.test.mjs scripts/webUIShellHost.test.mjs && swift test --scratch-path \"${TMPDIR:-/tmp}/ardia-shell-swiftpm\""
+  },
+  "dependencies": {
+    "@ardia/core": "workspace:*"
   },
   "peerDependencies": {
     "expo": "*",

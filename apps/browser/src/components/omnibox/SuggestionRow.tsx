@@ -1,9 +1,12 @@
-import { displayHost, displayUrl, hostOf, type Suggestion } from "@ardia/core";
+import type { Suggestion } from "@ardia/core";
 import { memo } from "react";
 import { Image, Pressable, Text as NativeText, View } from "react-native";
 import { Button, Symbol, Text, useHover, useTheme, withAlpha, type Theme } from "../ui";
 import { Favicon } from "../favicon/Favicon";
+import { suggestionLabels } from "./suggestionLabels";
 import { SELECTED_SUGGESTION_ALPHA, SUGGESTION } from "./tokens";
+
+export { suggestionLabels };
 
 const ICON_BOX = { width: SUGGESTION.iconBox, height: SUGGESTION.iconBox } as const;
 
@@ -32,30 +35,6 @@ export function SuggestionIcon({ suggestion: s, color }: { suggestion: Suggestio
       );
     case "provider":
       return <Favicon url={s.url} favicon={s.icon} />;
-  }
-}
-
-function labels(s: Suggestion, dropdown: boolean): [string, string | null] {
-  switch (s.kind) {
-    case "page": {
-      const url = displayUrl(s.url);
-      const title = dropdown && (!s.title || s.title === s.url || s.title === url) ? "Untitled page" : s.title || url;
-      return [title, s.tabId ? "Switch to Tab" : !dropdown && s.title ? url : null];
-    }
-    case "search":
-      return [s.bang ? `Search ${s.engine} for ${s.query}` : s.query, null];
-    case "calc":
-      return [s.value, s.expression];
-    case "action":
-    case "create":
-      return [s.title, null];
-    case "extension":
-      return [s.title, s.open === "action" ? "Open Extension" : "Extension Options"];
-    case "provider": {
-      if (dropdown) return [s.title, s.subtitle || null];
-      const host = displayHost(hostOf(s.url)) || displayUrl(s.url);
-      return [s.title, s.subtitle ? `${host} · ${s.subtitle}` : host];
-    }
   }
 }
 
@@ -133,7 +112,7 @@ const SuggestionRow = memo(
   }) {
     const theme = useTheme();
     const { hovered, hoverProps } = useHover();
-    const [title, accessory] = labels(s, dropdown);
+    const [title, accessory] = suggestionLabels(s, dropdown);
     const showSwitchTabIcon = switchTabIcon && s.kind === "page" && !!s.tabId;
     const titleSize = compactPageTitles && (s.kind === "page" || s.kind === "provider") ? "body" : "title";
     const hint = trailing ?? (s.kind === "action" ? s.hint : s.kind === "provider" ? s.provider : null);

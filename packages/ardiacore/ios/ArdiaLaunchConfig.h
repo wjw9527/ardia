@@ -8,6 +8,8 @@ NS_SWIFT_NAME(LaunchConfig)
 @property(class, readonly) ArdiaLaunchConfig *shared;
 
 - (instancetype)initWithEnvironment:(NSDictionary<NSString *, NSString *> *)environment
+                          arguments:(NSArray<NSString *> *)arguments
+                      homeDirectory:(NSString *)homeDirectory
               signedForDistribution:(BOOL (^)(void))signedForDistribution NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
@@ -19,10 +21,14 @@ NS_SWIFT_NAME(LaunchConfig)
 @property(readonly, nullable) NSString *feedbackURL;
 @property(readonly) BOOL isolated;
 @property(readonly) BOOL testInstance;
+@property(readonly) BOOL webUIShell;
+@property(readonly) BOOL webUIDataDirectoryDefaulted;
+@property(readonly, nullable) NSString *webUIHostApp;
+@property(readonly) BOOL webUIHandedOff;
+@property(readonly) BOOL webUIRefusedDataDirectory;
 
 - (nullable NSString *)instance:(NSString *)key NS_SWIFT_NAME(instance(_:));
 - (BOOL)instanceFlag:(NSString *)key NS_SWIFT_NAME(instanceFlag(_:));
-- (nullable NSNumber *)switchOverride:(NSString *)name NS_SWIFT_NAME(switchOverride(_:));
 - (BOOL)switchOn:(NSString *)name NS_SWIFT_NAME(switchOn(_:));
 - (BOOL)experimentOn:(NSString *)name NS_SWIFT_NAME(experimentOn(_:));
 - (BOOL)traced:(NSString *)area NS_SWIFT_NAME(traced(_:));

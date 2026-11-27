@@ -1,6 +1,6 @@
 import { Easing } from "react-native";
 import { useTheme } from "../ui/theme";
-import { duration, spring } from "../ui/motion";
+import { duration } from "../ui/motion";
 import { font, ink, radius, shadow, sidebarFont, sidebarIconSize, sidebarPoints, space, withAlpha, type ShadowLevel } from "../ui/tokens";
 import type { GroupColor } from "../../state/browser/types";
 import type { Settings } from "../../state/settings/settings";
@@ -90,7 +90,6 @@ export function useSidebarTokens(): SidebarTokens {
   return sidebarTokens(useTheme());
 }
 
-
 export const SIDEBAR_SHADOW = {
   dragGhost: { color: ink.black, opacity: { dark: 0.45, light: 0.18 }, radius: 10, offset: [0, 4] },
   card: shadow.card,
@@ -99,6 +98,7 @@ export const SIDEBAR_SHADOW = {
 } satisfies Record<string, ShadowLevel>;
 
 export const TAB_SWITCHER_SCROLL_ID = "ardia-tab-switcher";
+export const TAB_SWITCHER_LIST_ID = "ardia-tab-switcher-list";
 
 export const TAB_SWITCHER = {
   card: 168,
@@ -110,7 +110,9 @@ export const TAB_SWITCHER = {
   labelInset: space.xxs,
   cardInset: space.xs,
   windowMargin: 80,
+  maxCards: 7,
   panelRadius: 18,
+  list: { width: 380, row: 40, maxRows: 8, icon: 16, gap: space.ml, inset: space.ml, lineGap: 1 },
   get cardRadius() {
     return radius.panel;
   },
@@ -128,10 +130,10 @@ const TAB_SWITCHER_DARK = {
   fill: "#1C1C1EF2",
   focusFill: "rgba(255,255,255,0.14)",
   restRing: "rgba(255,255,255,0.12)",
-  pageFill: "#FFFFFF",
   blankFill: "#3A3A3C",
   onPanel: "#FFFFFFB3",
   onPage: "#000000A6",
+  onDark: "#FFFFFFB3",
   title: "#FFFFFF",
 };
 
@@ -139,10 +141,10 @@ const TAB_SWITCHER_LIGHT: typeof TAB_SWITCHER_DARK = {
   fill: "#F2F2F7F2",
   focusFill: "rgba(0,0,0,0.18)",
   restRing: "rgba(0,0,0,0.1)",
-  pageFill: "#FFFFFF",
   blankFill: "#D1D1D6",
   onPanel: "#000000A6",
   onPage: "#000000A6",
+  onDark: "#FFFFFFB3",
   title: "#000000D9",
 };
 
@@ -152,14 +154,13 @@ export const SELECTED_ROW_SHADOW_OFFSET: [number, number] = [0, 0.5];
 
 export const TILE_GLOW = { opacity: { dark: 0.15, light: 0.12 }, radius: 1.5, offset: [0, 0.5] as [number, number] };
 
-export const SIDEBAR_MOTION = { liveFold: duration.long, fold: duration.base, listSlide: 140, listFade: 100, hoverCardFade: 100 } as const;
+export const SIDEBAR_MOTION = { liveFold: duration.long, fold: duration.base, listSlide: 140, listFade: 100, listAppear: 140, hoverCardFade: 100 } as const;
 
 export const SLEEPING_TITLE_OPACITY = 0.6;
 
 export const SPLIT_DROP = { gap: 14 } as const;
 
 export const SPLIT_PREVIEW = { response: 0.1, damping: 1 } as const;
-
 
 export const GHOST_TILE_MORPH = { response: 0.1, damping: 1 } as const;
 
@@ -363,7 +364,7 @@ export function groupSurface(color: GroupColor | null | undefined, tokens: Sideb
   return tint ? { fill: withAlpha(tint, 0.16), stroke: withAlpha(tint, 0.3) } : { fill: tokens.groupFill, stroke: tokens.groupStroke };
 }
 
-export { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "../../lib/windowLayout";
+export { SIDEBAR_MIN_WIDTH } from "../../lib/windowLayout";
 export const SIDEBAR_RESIZE_HANDLE = { top: 46, width: 8 } as const;
 export const SELECTED_ROW_PILL = {
   height: 28,
