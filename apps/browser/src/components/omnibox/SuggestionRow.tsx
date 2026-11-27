@@ -69,6 +69,7 @@ export const SuggestionList = memo(function SuggestionList({
   selectedIndex,
   trailing,
   dropdown,
+  switchTabIcon,
   compactPageTitles,
   rowHeight,
   actions,
@@ -77,6 +78,7 @@ export const SuggestionList = memo(function SuggestionList({
   selectedIndex: number;
   trailing: string | null;
   dropdown: boolean;
+  switchTabIcon: boolean;
   compactPageTitles: boolean;
   rowHeight: number;
   actions: RowActions;
@@ -92,6 +94,7 @@ export const SuggestionList = memo(function SuggestionList({
           trailing={i === 0 ? trailing : null}
           height={rowHeight}
           dropdown={dropdown}
+          switchTabIcon={switchTabIcon}
           compactPageTitles={compactPageTitles}
           actions={actions}
         />
@@ -115,6 +118,7 @@ const SuggestionRow = memo(
     trailing,
     height,
     dropdown,
+    switchTabIcon,
     compactPageTitles,
     actions,
   }: {
@@ -123,19 +127,21 @@ const SuggestionRow = memo(
     trailing: string | null;
     height: number;
     dropdown: boolean;
+    switchTabIcon: boolean;
     compactPageTitles: boolean;
     actions: RowActions;
   }) {
     const theme = useTheme();
     const { hovered, hoverProps } = useHover();
     const [title, accessory] = labels(s, dropdown);
+    const showSwitchTabIcon = switchTabIcon && s.kind === "page" && !!s.tabId;
     const titleSize = compactPageTitles && (s.kind === "page" || s.kind === "provider") ? "body" : "title";
     const hint = trailing ?? (s.kind === "action" ? s.hint : s.kind === "provider" ? s.provider : null);
     const onRemove = isRemovable(s) ? () => actions.remove(s.url) : undefined;
     const removable = !!onRemove && (hovered || selected);
     return (
       <View {...hoverProps}>
-        <Pressable onPress={() => actions.choose(s)}>
+        <Pressable onPress={() => actions.choose(s)} accessibilityRole={showSwitchTabIcon ? "button" : undefined} accessibilityLabel={showSwitchTabIcon ? `${title}, ${accessory}` : undefined}>
           <View
             style={{
               height,
@@ -151,7 +157,7 @@ const SuggestionRow = memo(
             <SuggestionIcon suggestion={s} />
             <Text lines={1} size={titleSize} ardiaCentersCapitals style={{ flexShrink: 1 }}>
               {title}
-              {accessory ? (
+              {accessory && !showSwitchTabIcon ? (
                 <NativeText style={{ color: theme.textSecondary }}>
                   {" — "}
                   {accessory}
@@ -160,6 +166,7 @@ const SuggestionRow = memo(
             </Text>
             <View style={{ flex: 1 }} />
             {hint && !removable ? <Text size="small" tone="textTertiary" ardiaCentersCapitals>{hint}</Text> : null}
+            {showSwitchTabIcon ? <Symbol name="arrow.up.right" size={SUGGESTION.icon} color={theme.textSecondary} style={ICON_BOX} /> : null}
             {removable ? (
               <Button variant="icon" icon="xmark" size="s" color={theme.textSecondary} tooltip="Remove from History" onPress={onRemove} />
             ) : null}
@@ -168,5 +175,5 @@ const SuggestionRow = memo(
       </View>
     );
   },
-  (a, b) => a.selected === b.selected && a.trailing === b.trailing && a.height === b.height && a.dropdown === b.dropdown && a.compactPageTitles === b.compactPageTitles && a.actions === b.actions && sameSuggestion(a.suggestion, b.suggestion),
+  (a, b) => a.selected === b.selected && a.trailing === b.trailing && a.height === b.height && a.dropdown === b.dropdown && a.switchTabIcon === b.switchTabIcon && a.compactPageTitles === b.compactPageTitles && a.actions === b.actions && sameSuggestion(a.suggestion, b.suggestion),
 );
