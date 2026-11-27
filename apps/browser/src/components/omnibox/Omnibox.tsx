@@ -336,7 +336,7 @@ export function Omnibox({
       selectedIndex={selectedIndex}
       trailing={tabScope ? `Search ${tabScope.name}  ⇥` : null}
       dropdown={dropdown}
-      rowHeight={opensTab ? SUGGESTION.newTabHeight : SUGGESTION.height}
+      rowHeight={dropdown || opensTab ? SUGGESTION.expandedHeight : SUGGESTION.height}
       actions={rowActions}
     />
   );
