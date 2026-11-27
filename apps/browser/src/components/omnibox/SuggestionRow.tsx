@@ -69,6 +69,7 @@ export const SuggestionList = memo(function SuggestionList({
   selectedIndex,
   trailing,
   dropdown,
+  compactPageTitles,
   rowHeight,
   actions,
 }: {
@@ -76,6 +77,7 @@ export const SuggestionList = memo(function SuggestionList({
   selectedIndex: number;
   trailing: string | null;
   dropdown: boolean;
+  compactPageTitles: boolean;
   rowHeight: number;
   actions: RowActions;
 }) {
@@ -90,6 +92,7 @@ export const SuggestionList = memo(function SuggestionList({
           trailing={i === 0 ? trailing : null}
           height={rowHeight}
           dropdown={dropdown}
+          compactPageTitles={compactPageTitles}
           actions={actions}
         />
       ))}
@@ -112,6 +115,7 @@ const SuggestionRow = memo(
     trailing,
     height,
     dropdown,
+    compactPageTitles,
     actions,
   }: {
     suggestion: Suggestion;
@@ -119,12 +123,13 @@ const SuggestionRow = memo(
     trailing: string | null;
     height: number;
     dropdown: boolean;
+    compactPageTitles: boolean;
     actions: RowActions;
   }) {
     const theme = useTheme();
     const { hovered, hoverProps } = useHover();
     const [title, accessory] = labels(s, dropdown);
-    const titleSize = dropdown && (s.kind === "page" || s.kind === "provider") ? "body" : "title";
+    const titleSize = compactPageTitles && (s.kind === "page" || s.kind === "provider") ? "body" : "title";
     const hint = trailing ?? (s.kind === "action" ? s.hint : s.kind === "provider" ? s.provider : null);
     const onRemove = isRemovable(s) ? () => actions.remove(s.url) : undefined;
     const removable = !!onRemove && (hovered || selected);
@@ -163,5 +168,5 @@ const SuggestionRow = memo(
       </View>
     );
   },
-  (a, b) => a.selected === b.selected && a.trailing === b.trailing && a.height === b.height && a.dropdown === b.dropdown && a.actions === b.actions && sameSuggestion(a.suggestion, b.suggestion),
+  (a, b) => a.selected === b.selected && a.trailing === b.trailing && a.height === b.height && a.dropdown === b.dropdown && a.compactPageTitles === b.compactPageTitles && a.actions === b.actions && sameSuggestion(a.suggestion, b.suggestion),
 );

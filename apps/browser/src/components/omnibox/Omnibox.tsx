@@ -336,6 +336,7 @@ export function Omnibox({
       selectedIndex={selectedIndex}
       trailing={tabScope ? `Search ${tabScope.name}  ⇥` : null}
       dropdown={dropdown}
+      compactPageTitles={dropdown || !!opensTab}
       rowHeight={dropdown || opensTab ? SUGGESTION.expandedHeight : SUGGESTION.height}
       actions={rowActions}
     />
