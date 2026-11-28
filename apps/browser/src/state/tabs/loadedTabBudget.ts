@@ -21,8 +21,6 @@ import { shownTabIds } from "./shownTabs";
 import { isSleeping, useLifecycle } from "./sleepingTabs";
 import { engineVeto, MINUTE, sleepRules, sleepVeto, tabsToSleep, type SleepPlan, type SleepRules, type SleepVeto, type TabSleepFacts } from "./sleepPolicy";
 import { liveOf, onLiveChange } from "./tabLive";
-import { countSwitch, forgetSwitchesExcept, switchesOf } from "./tabSwitches";
-import { onFrontTabChanged } from "../windows/frontTabs";
 import { heldByCli } from "./cliHolds";
 
 type LoadedTabBudget = Pick<SleepRules, "tabs" | "hiddenMs"> & Partial<SleepRules>;
@@ -68,7 +66,6 @@ function sleepFacts(s: BrowserState, id: string, shown: ReadonlySet<string>, see
     shown: shown.has(id),
     cliSession: heldByCli(id),
     lastSeenAt: Math.max(tab.lastActiveAt, seenAt.get(id) ?? 0),
-    switches: switchesOf(id),
     audible: audibleNow(id),
     lastAudibleAt: lastAudibleAt.get(id) ?? 0,
     call: capturing(id),
@@ -110,7 +107,7 @@ export function tabsOverBudget(
   return plan.sleep;
 }
 
-const COUNTED_VETOES: ReadonlySet<SleepVeto> = new Set(["cliSession", "call", "pictureInPicture", "audible", "recentlyAudible", "frequentlyUsed", "typedInput", "postedDocument", "beforeUnload", "download", "other"]);
+const COUNTED_VETOES: ReadonlySet<SleepVeto> = new Set(["cliSession", "call", "pictureInPicture", "audible", "recentlyAudible", "typedInput", "postedDocument", "beforeUnload", "download", "other"]);
 const countedVetoes = new Set<string>();
 let countedIn: ConsentToken | null = null;
 
@@ -163,7 +160,6 @@ async function sweepOverBudget(budget: LoadedTabBudget | null, now: number, cons
   for (const id of seenAt.keys()) if (!s.tabs[id]) seenAt.delete(id);
   for (const id of lastAudibleAt.keys()) if (!s.tabs[id]) lastAudibleAt.delete(id);
   for (const key of countedVetoes) if (!s.tabs[vetoedTabOf(key)]) countedVetoes.delete(key);
-  forgetSwitchesExcept(s.tabs);
   for (const [id, at] of askAgainAt) if (!s.tabs[id] || at <= now) askAgainAt.delete(id);
   for (const [id, at] of keptAt) if (!s.tabs[id] || now - at >= KEPT_RECENTLY_MS) keptAt.delete(id);
   const plan = planOverBudget(s, webviews.keys(), budget, now, seenAt, askAgainAt);
@@ -266,7 +262,6 @@ export function startLoadedTabBudget(system: () => SystemState | null) {
   if (started) return;
   started = true;
   const budget = (budgetNow = () => loadedTabBudget(useBrowser.getState().settings, system()));
-  onFrontTabChanged((change) => countSwitch(change));
   onLiveChange((tabId, live, prev) => {
     if (prev.playingAudio && !live.playingAudio) noteAudibleEnded(tabId);
   });

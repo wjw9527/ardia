@@ -417,24 +417,21 @@ test("an in-flight app memory sweep blocks the ordinary sweep and skips newly ac
   }
 });
 
-test("a tab switched to 15 times stays loaded, and each kind of protection that kept a tab is counted once per tab", async (t) => {
+test("an idle tab can sleep after 15 switches, and each protection is counted once per tab", async (t) => {
   const { sleepTabsOverBudget, tabsOverBudget } = await import("./loadedTabBudget.ts");
-  const { switchesOf, clearSwitches } = await import("./tabSwitches.ts");
   const { webviews } = await import("../../platform/webviews.ts");
   const { takeTabSleepCounts } = await import("../telemetry/tabSleepCounts.ts");
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const now = Date.now() + 480 * 60 * minute;
   const { ids, active } = windowOfHiddenTabs(4, now);
   lifecycle.startTabLifecycle();
-  clearSwitches();
   for (let i = 0; i < 15; i++) {
     S().activate(ids[3]);
     S().activate(active);
   }
-  assert.equal(switchesOf(ids[3]), 15, "each switch to the tab counts once");
   ids.forEach((id, i) => S().updateTab(id, { lastActiveAt: now - (60 + i * 60) * minute }));
   const budget = { tabs: 1, hiddenMs: 30 * minute };
-  assert.ok(!tabsOverBudget(S(), [active, ...ids], budget, now).includes(ids[3]), "the oldest tab is kept because it is used all the time");
+  assert.equal(tabsOverBudget(S(), [active, ...ids], budget, now)[0], ids[3], "the idle tab remains the oldest candidate after 15 switches");
   webviews.clear();
   const answers = { [ids[2]]: [100], [ids[1]]: [101, 26] };
   for (const id of [active, ...ids]) webviews.set(id, { sleepIfHidden: () => Promise.resolve(answers[id] ?? []) });
@@ -447,17 +444,15 @@ test("a tab switched to 15 times stays loaded, and each kind of protection that 
     }
     return done;
   };
-  assert.deepEqual(await sweep(now), [ids[0]], "the page left by a form post and the one with an unload prompt stay; the idle one sleeps");
-  lifecycle.noteDiscarded(ids[0]);
+  assert.deepEqual(await sweep(now), [ids[3], ids[0]], "the two eligible idle tabs sleep while the form and unload-prompt tabs stay");
+  for (const id of [ids[3], ids[0]]) lifecycle.noteDiscarded(id);
   await sweep(now + minute);
   const counts = takeTabSleepCounts();
-  assert.equal(counts.sleep_kept_frequently_used, 1, "counted once, not once per sweep");
-  assert.equal(counts.sleep_kept_posted_document, 1);
+  assert.equal(counts.sleep_kept_posted_document, 1, "counted once, not once per sweep");
   assert.equal(counts.sleep_kept_before_unload, 1, "an unload prompt outranks typed input");
   assert.equal(counts.sleep_kept_typed_input, 0);
-  assert.equal(counts.tabs_slept_over_budget, 1);
+  assert.equal(counts.tabs_slept_over_budget, 2);
   webviews.clear();
-  clearSwitches();
 });
 
 test("a candidate that starts playing sound while an earlier tab's answer is awaited isn't asked, and each tab is counted once per reason", async (t) => {

@@ -72,7 +72,6 @@ const VETO_FIELDS: Partial<Record<SleepVeto, string>> = {
   pictureInPicture: "sleep_kept_picture_in_picture",
   audible: "sleep_kept_audible",
   recentlyAudible: "sleep_kept_recently_audible",
-  frequentlyUsed: "sleep_kept_frequently_used",
   typedInput: "sleep_kept_typed_input",
   postedDocument: "sleep_kept_posted_document",
   beforeUnload: "sleep_kept_before_unload",

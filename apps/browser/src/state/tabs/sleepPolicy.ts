@@ -15,7 +15,6 @@ export type SleepVeto =
   | "pictureInPicture"
   | "audible"
   | "recentlyAudible"
-  | "frequentlyUsed"
   | "recentlySeen"
   | "keptRecently"
   | "loading"
@@ -31,7 +30,6 @@ export type TabSleepFacts = {
   shown: boolean;
   cliSession: boolean;
   lastSeenAt: number;
-  switches: number;
   audible: boolean;
   lastAudibleAt: number;
   call: boolean;
@@ -43,7 +41,6 @@ export type TabSleepFacts = {
 export const MINUTE = 60_000;
 export const RECENTLY_SEEN_MS = 10 * MINUTE;
 export const RECENTLY_AUDIBLE_MS = MINUTE;
-export const FREQUENT_SWITCHES = 15;
 const SLEEPS_PER_TICK = 4;
 
 const GIB = 2 ** 30;
@@ -95,7 +92,6 @@ export function sleepVeto(tab: TabSleepFacts, now: number, rules: SleepEligibili
   if (tab.pictureInPicture) return "pictureInPicture";
   if (tab.audible) return "audible";
   if (now - tab.lastAudibleAt < RECENTLY_AUDIBLE_MS) return "recentlyAudible";
-  if (tab.switches >= FREQUENT_SWITCHES) return "frequentlyUsed";
   if (now - tab.lastSeenAt < seenWindowMs(rules)) return "recentlySeen";
   if (tab.askAgainAt > now) return "keptRecently";
   if (tab.loading) return "loading";

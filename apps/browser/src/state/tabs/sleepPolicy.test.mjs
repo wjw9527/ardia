@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { capWarmPanes, warmOrder, engineVeto, FREQUENT_SWITCHES, MINUTE, RECENTLY_AUDIBLE_MS, RECENTLY_SEEN_MS, sleepRules, sleepVeto, tabsToSleep } from "./sleepPolicy.ts";
-import { countSwitch } from "./tabSwitches.ts";
-import { frontTabChanges } from "../windows/frontTabs.ts";
-
-const countSwitches = (prev, next, counts) => {
-  for (const change of frontTabChanges(prev, next)) countSwitch(change, counts);
-};
+import { capWarmPanes, warmOrder, engineVeto, MINUTE, RECENTLY_AUDIBLE_MS, RECENTLY_SEEN_MS, sleepRules, sleepVeto, tabsToSleep } from "./sleepPolicy.ts";
 
 const NOW = 1_000_000_000_000;
 const idle = (id, minutesAgo, extra = {}) => ({
@@ -14,7 +8,6 @@ const idle = (id, minutesAgo, extra = {}) => ({
   sleepable: true,
   shown: false,
   lastSeenAt: NOW - minutesAgo * MINUTE,
-  switches: 0,
   audible: false,
   lastAudibleAt: 0,
   call: false,
@@ -47,8 +40,6 @@ test("every protection vetoes on its own, read against the injected clock", () =
   assert.equal(veto({ audible: true }), "audible");
   assert.equal(veto({ lastAudibleAt: NOW - RECENTLY_AUDIBLE_MS + 1 }), "recentlyAudible", "sound stopped under a minute ago");
   assert.equal(veto({ lastAudibleAt: NOW - RECENTLY_AUDIBLE_MS }), null, "a minute after the sound stopped it may sleep");
-  assert.equal(veto({ switches: FREQUENT_SWITCHES }), "frequentlyUsed");
-  assert.equal(veto({ switches: FREQUENT_SWITCHES - 1 }), null);
   assert.equal(veto({ askAgainAt: NOW + 1 }), "keptRecently", "the engine kept it a moment ago");
   assert.equal(veto({ loading: true }), "loading");
   assert.equal(sleepVeto(idle("t", 29), NOW, normal), "recentlySeen", "hidden less than the mode's wait");
@@ -75,22 +66,6 @@ test("the engine's reasons map to the protection that matters most", () => {
   assert.equal(engineVeto([7]), "recentlySeen");
   assert.equal(engineVeto([25]), "other");
   assert.equal(engineVeto([-1]), "notSleepable");
-});
-
-test("a tab switch counts once per change of a window's front tab, including a return to a profile page's remembered tab", () => {
-  const counts = new Map();
-  const tabs = Object.fromEntries(["a", "b", "x"].map((id) => [id, { windowId: "w1" }]));
-  const at = (profileId, active) => ({ tabs, windows: { w1: { profileId, activeTabIds: active } } });
-  let prev = at("p1", { p1: "a" });
-  for (const next of [at("p1", { p1: "b" }), at("p1", { p1: "a" }), at("p2", { p1: "a", p2: "x" }), at("p1", { p1: "a", p2: "x" }), at("p2", { p1: "a", p2: "x" })]) {
-    countSwitches(prev, next, counts);
-    prev = next;
-  }
-  assert.deepEqual(Object.fromEntries(counts), { b: 1, a: 2, x: 2 }, "paging back to p2 shows x again without touching activeTabIds, and counts");
-  countSwitches(prev, prev, counts);
-  assert.equal(counts.get("x"), 2, "the same windows count nothing");
-  countSwitches(prev, at("p2", { p1: "b", p2: "x" }), counts);
-  assert.equal(counts.get("b"), 1, "a change on a profile page that isn't shown is no visit");
 });
 
 test("warm pages are capped after split tabs expand into their panes, the next tab first, and shown panes don't count", () => {
